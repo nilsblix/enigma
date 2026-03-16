@@ -1,8 +1,6 @@
 // FIX Remove
 #![allow(dead_code)]
 
-use std::sync::Arc;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Op(u8);
 
@@ -176,7 +174,7 @@ impl Payload {
             Payload::R{rr, ra, rb} =>
                 ((*rr as u32) << 21)
                 | ((*ra as u32) << 16)
-                | ((*rb as u32) << 21),
+                | ((*rb as u32) << 11),
             Payload::I{rr, ra, immediate} =>
                 ((*rr as u32) << 21)
                 | ((*ra as u32) << 16)
@@ -379,6 +377,7 @@ impl Machine {
         self.set_program_counter(ByteAddress(self.program_counter + 1));
     }
 
+    // TODO should this init the block if the index doesn't exist?
     pub fn block(&self, block_index: BlockIndex) -> &Block {
         &self.blocks[usize::from(block_index)]
     }
@@ -502,12 +501,6 @@ impl Machine {
         }
         Ok((instruction, result))
     }
-
-    /// Execute instructions sequentially until a `jmp` instruction with offset
-    /// 0, the conventional way to denote the end of a program.
-    pub fn run_until_loop(&mut self) {
-
-    }
 }
 
 fn main() {
@@ -578,20 +571,20 @@ mod tests {
         };
         let res = Instruction::decode(word).unwrap();
         assert_eq!(res, inst);
-        assert_eq!(res.op.name(), "subi");
+        assert_eq!(res.op.name(), "jmp");
         assert_eq!(res.encode(), word);
     }
 
     #[test]
     fn execute_and_advance() {
         let mut m = Machine::new();
-        m.set_register(1, 34);
-        m.set_register(2, 35);
+        m.set_register(2, 34);
+        m.set_register(3, 35);
 
         // add r0, r1, r2
         //          |  op | rr | ra | rb |  packing  |
         //          |     V    V    V    V           |
-        let word = 0b00000100000000010001011111111111 as u32;
+        let word = 0b00000100001000100001100000000000 as u32;
         let bytes = word.to_be_bytes();
         let mut mem = Box::new([0u8; BLOCK_SIZE]);
         mem.as_mut_slice()[0] = bytes[0];
@@ -600,11 +593,8 @@ mod tests {
         mem.as_mut_slice()[3] = bytes[3];
         m.blocks[0] = Block::Memory(mem);
 
-        let i = Instruction::decode(word).unwrap();
-        println!("{:?}", i);
-
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
-        assert_eq!(m.register(0), 69);
+        assert_eq!(m.register(1), 69);
     }
 }
