@@ -253,6 +253,7 @@ impl Instruction {
 pub const BLOCK_SIZE: usize = 1 << 16;
 pub const BLOCK_COUNT: usize = 1 << 16;
 pub const REGISTER_COUNT: usize = 32;
+pub const WORD_SIZE_BYTES: u32 = 4;
 
 pub enum Block {
     Empty,
@@ -284,10 +285,19 @@ impl ByteAddress {
     /// Add some word offset to the address, returning a new address
     /// and a [`bool`] indicating overflow.
     pub fn overflowing_add(self, word_offset: u32) -> (ByteAddress, bool) {
-        let byte_offset = word_offset << 2;
-        let byte_addr = self.0 << 2;
-        let (new_byte_addr, overflow) = byte_addr.overflowing_add(byte_offset);
-        (ByteAddress(new_byte_addr >> 2), overflow)
+        let (byte_offset, offset_overflow) = word_offset.overflowing_mul(WORD_SIZE_BYTES);
+        let (new_byte_addr, addr_overflow) = self.0.overflowing_add(byte_offset);
+        (ByteAddress(new_byte_addr), offset_overflow || addr_overflow)
+    }
+
+    /// Add some signed word offset to the address, returning a new address
+    /// and a [`bool`] indicating overflow.
+    pub fn overflowing_add_signed(self, word_offset: i32) -> (ByteAddress, bool) {
+        let byte_offset = (word_offset as i64) * (WORD_SIZE_BYTES as i64);
+        let total = (self.0 as i64) + byte_offset;
+        let overflow = !(0..=((u32::MAX) as i64)).contains(&total);
+        let wrapped = total.rem_euclid((u32::MAX as i64) + 1) as u32;
+        (ByteAddress(wrapped), overflow)
     }
 }
 
@@ -403,13 +413,13 @@ impl Machine {
     }
 
     pub fn add_program_counter_signed(&mut self, word_offset: i32) {
-        self.program_counter.0 = self.program_counter.0.overflowing_add_signed(word_offset).0
+        let (addr, _) = self.program_counter.overflowing_add_signed(word_offset);
+        self.set_program_counter(addr);
     }
 
     pub fn advance(&mut self) {
-        // We increment by 4 as program_counter is u32, while our memory is
-        // effectively [u8; u32::MAX].
-        self.set_program_counter(ByteAddress(self.program_counter.0 + 4));
+        let (addr, _) = self.program_counter.overflowing_add(1);
+        self.set_program_counter(addr);
     }
 
     // TODO should this init the block if the index doesn't exist?
@@ -493,8 +503,8 @@ impl Machine {
             }
             Op::JMPR_CODE => {
                 let (ret, _) = self.program_counter.overflowing_add(1);
-                let addr = r_a.wrapping_add_signed(imm as i16 as i32);
-                self.set_program_counter(ByteAddress(addr as u32));
+                let (addr, _) = ByteAddress(r_a).overflowing_add_signed(imm as i16 as i32);
+                self.set_program_counter(addr);
                 jumped = true;
                 Some(ret.0)
             }
@@ -616,8 +626,6 @@ mod tests {
         m.set_register(2, 34);
         m.set_register(3, 35);
 
-        Instruction{ op: Op::ADD, payload: Payload::R{ rr: 1, ra: 2, rb: 3 }};
-
         // add r0, r1, r2
         //          |  op | rr | ra | rb |  packing  |
         //          |     V    V    V    V           |
@@ -646,7 +654,7 @@ mod tests {
         let instructions = [
             Instruction{ op: Op::ADD, payload: Payload::R{ rr: 1, ra: 2, rb: 3 }},
             Instruction{ op: Op::BEQ, payload: Payload::I{ rr: 1, ra: 4, immediate: 2 }},
-            Instruction{ op: Op::NOOP, payload: Payload::I{ rr: 0, ra: 0, immediate: 0 }},
+            Instruction{ op: Op::NOOP, payload: Payload::Noop},
             Instruction{ op: Op::SHL, payload: Payload::R{ rr: 6, ra: 1, rb: 5 }},
         ];
 
@@ -666,5 +674,45 @@ mod tests {
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
         assert_eq!(m.register(6), 268);
+    }
+
+    #[test]
+    fn jump_and_link_uses_word_offsets() {
+        let instructions = [
+            Instruction{ op: Op::JMP, payload: Payload::I{ rr: 1, ra: 0, immediate: 2 }},
+            Instruction{ op: Op::NOOP, payload: Payload::Noop },
+            Instruction{ op: Op::ADDI, payload: Payload::I{ rr: 2, ra: 0, immediate: 9 }},
+        ];
+
+        let mut m = Machine::from_instructions(instructions.as_slice());
+
+        let outcome = m.execute_and_advance().unwrap();
+        assert!(outcome.1.jumped);
+        assert_eq!(m.register(1), 4);
+
+        let outcome = m.execute_and_advance().unwrap();
+        assert!(!outcome.1.jumped);
+        assert_eq!(m.register(2), 9);
+    }
+
+    #[test]
+    fn register_relative_jump_uses_word_offsets() {
+        let instructions = [
+            Instruction{ op: Op::JMPR, payload: Payload::I{ rr: 1, ra: 3, immediate: 2 }},
+            Instruction{ op: Op::NOOP, payload: Payload::Noop },
+            Instruction{ op: Op::NOOP, payload: Payload::Noop },
+            Instruction{ op: Op::ADDI, payload: Payload::I{ rr: 2, ra: 0, immediate: 11 }},
+        ];
+
+        let mut m = Machine::from_instructions(instructions.as_slice());
+        m.set_register(3, 4);
+
+        let outcome = m.execute_and_advance().unwrap();
+        assert!(outcome.1.jumped);
+        assert_eq!(m.register(1), 4);
+
+        let outcome = m.execute_and_advance().unwrap();
+        assert!(!outcome.1.jumped);
+        assert_eq!(m.register(2), 11);
     }
 }
