@@ -254,16 +254,19 @@ pub const BLOCK_SIZE: usize = 1 << 16;
 pub const BLOCK_COUNT: usize = 1 << 16;
 pub const REGISTER_COUNT: usize = 32;
 
-enum Block {
+pub enum Block {
     Empty,
     Memory(Box<[u8; BLOCK_SIZE]>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct ByteAddress(u32);
+pub struct ByteAddress(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockIndex(u16);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BlockOffset(u16);
 
 impl From<BlockIndex> for usize {
     fn from(val: BlockIndex) -> Self {
@@ -288,9 +291,6 @@ impl ByteAddress {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct BlockOffset(u16);
-
 impl From<BlockOffset> for usize {
     fn from(val: BlockOffset) -> Self {
         val.0 as usize
@@ -310,14 +310,32 @@ impl Block {
         };
         u32::from_be_bytes(bytes)
     }
+
+    pub fn set_byte(&mut self, byte: u8, offset: BlockOffset) {
+        match self {
+            Block::Empty => {
+                *self = Block::Memory(Box::new([0u8; BLOCK_SIZE]));
+                self.set_byte(byte, offset);
+            },
+            Block::Memory(mem) => mem[usize::from(offset)] = byte,
+        }
+    }
+
+    pub fn set_instruction(&mut self, inst: Instruction, offset: BlockOffset) {
+        let bytes = inst.encode().to_be_bytes();
+        self.set_byte(bytes[0], offset);
+        self.set_byte(bytes[1], BlockOffset(offset.0 + 1));
+        self.set_byte(bytes[2], BlockOffset(offset.0 + 2));
+        self.set_byte(bytes[3], BlockOffset(offset.0 + 3));
+    }
 }
 
 /// We intend to map the addresses above the stack to IO.
 pub const STACK_BEGINNING: u32 = 0xEFFFFFFF;
 pub const SP_INDEX: usize = REGISTER_COUNT - 1;
 
-struct Machine {
-    program_counter: u32,
+pub struct Machine {
+    program_counter: ByteAddress,
     regs: [u32; REGISTER_COUNT],
     /// We don't allocate the entire 4GB upfront, but instead allocate blocks of
     /// 2^16 bytes (~4kB) at a time.
@@ -335,9 +353,9 @@ pub struct InstructionOutcome {
 pub type ExecuteResult = Result<(Instruction, InstructionOutcome), InstructionError>;
 
 impl Machine {
-    fn new() -> Machine {
+    pub fn new() -> Machine {
         let mut m = Machine {
-            program_counter: 0,
+            program_counter: ByteAddress(0),
             regs: [0u32; REGISTER_COUNT],
             blocks: std::iter::repeat_with(|| Block::Empty)
                 .take(BLOCK_COUNT)
@@ -347,6 +365,21 @@ impl Machine {
                 .expect("failed to initialize memory-blocks")
         };
         m.regs[SP_INDEX] = STACK_BEGINNING;
+        m
+    }
+
+    pub fn from_instructions(instructions: &[Instruction]) -> Machine {
+        let mut m = Machine::new();
+        let blocks = m.blocks.as_mut_slice();
+
+        let mut addr = ByteAddress(0);
+        for i in instructions {
+            let (idx, offset) = addr.into_block_parts();
+            blocks[usize::from(idx)].set_instruction(i.clone(), offset);
+            // Each instruction is 4 bytes.
+            addr.0 += 4;
+        }
+
         m
     }
 
@@ -363,18 +396,20 @@ impl Machine {
     }
 
     pub fn set_program_counter(&mut self, addr: ByteAddress) {
-        self.program_counter = addr.0;
-        if self.program_counter as usize >= BLOCK_COUNT * BLOCK_SIZE {
+        self.program_counter = addr;
+        if self.program_counter.0 as usize >= BLOCK_COUNT * BLOCK_SIZE {
             panic!("tried to set the program counter to outside of the machine's memory");
         }
     }
 
     pub fn add_program_counter_signed(&mut self, word_offset: i32) {
-        self.program_counter = self.program_counter.overflowing_add_signed(word_offset).0
+        self.program_counter.0 = self.program_counter.0.overflowing_add_signed(word_offset).0
     }
 
     pub fn advance(&mut self) {
-        self.set_program_counter(ByteAddress(self.program_counter + 1));
+        // We increment by 4 as program_counter is u32, while our memory is
+        // effectively [u8; u32::MAX].
+        self.set_program_counter(ByteAddress(self.program_counter.0 + 4));
     }
 
     // TODO should this init the block if the index doesn't exist?
@@ -398,7 +433,7 @@ impl Machine {
     }
 
     pub fn current_instruction(&self) -> Result<Instruction, InstructionError> {
-        self.instruction_at(ByteAddress(self.program_counter))
+        self.instruction_at(self.program_counter)
     }
 
     pub fn execute(&mut self, inst: &Instruction) -> InstructionOutcome {
@@ -451,13 +486,13 @@ impl Machine {
             Op::ADDI_CODE => Some(r_a.wrapping_add(imm as u32)),
             Op::SUBI_CODE => Some(r_a.wrapping_sub(imm as u32)),
             Op::JMP_CODE => {
-                let (ret, _) = ByteAddress(self.program_counter).overflowing_add(1);
+                let (ret, _) = self.program_counter.overflowing_add(1);
                 self.add_program_counter_signed(imm as i16 as i32);
                 jumped = true;
                 Some(ret.0)
             }
             Op::JMPR_CODE => {
-                let (ret, _) = ByteAddress(self.program_counter).overflowing_add(1);
+                let (ret, _) = self.program_counter.overflowing_add(1);
                 let addr = r_a.wrapping_add_signed(imm as i16 as i32);
                 self.set_program_counter(ByteAddress(addr as u32));
                 jumped = true;
@@ -576,10 +611,12 @@ mod tests {
     }
 
     #[test]
-    fn execute_and_advance() {
+    fn painfully_written_execute_and_advance() {
         let mut m = Machine::new();
         m.set_register(2, 34);
         m.set_register(3, 35);
+
+        Instruction{ op: Op::ADD, payload: Payload::R{ rr: 1, ra: 2, rb: 3 }};
 
         // add r0, r1, r2
         //          |  op | rr | ra | rb |  packing  |
@@ -596,5 +633,38 @@ mod tests {
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
         assert_eq!(m.register(1), 69);
+    }
+
+    #[test]
+    fn execute_and_advance() {
+        // expected behaviour:
+        // 1) set r1 to 33 + 34 = 67
+        // 2) see that r1 is eq to r4, therefore jump to:
+        // 3) set r6 to 67 (0b1000011) to 268 (0b100001100)
+        //
+        // i.e the noop should not be executed.
+        let instructions = [
+            Instruction{ op: Op::ADD, payload: Payload::R{ rr: 1, ra: 2, rb: 3 }},
+            Instruction{ op: Op::BEQ, payload: Payload::I{ rr: 1, ra: 4, immediate: 2 }},
+            Instruction{ op: Op::NOOP, payload: Payload::I{ rr: 0, ra: 0, immediate: 0 }},
+            Instruction{ op: Op::SHL, payload: Payload::R{ rr: 6, ra: 1, rb: 5 }},
+        ];
+
+        let mut m = Machine::from_instructions(instructions.as_slice());
+        m.set_register(2, 33);
+        m.set_register(3, 34);
+        m.set_register(4, 67);
+        m.set_register(5, 2);
+
+        let outcome = m.execute_and_advance().unwrap();
+        assert!(!outcome.1.jumped);
+        assert_eq!(m.register(1), 67);
+
+        let outcome = m.execute_and_advance().unwrap();
+        assert!(outcome.1.jumped);
+
+        let outcome = m.execute_and_advance().unwrap();
+        assert!(!outcome.1.jumped);
+        assert_eq!(m.register(6), 268);
     }
 }
