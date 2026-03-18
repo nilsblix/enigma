@@ -264,6 +264,12 @@ pub enum Block {
 pub struct ByteAddress(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WordAddress(u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WordOffset(i32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockIndex(u16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -276,34 +282,74 @@ impl From<BlockIndex> for usize {
 }
 
 impl ByteAddress {
+    pub const ZERO: Self = Self(0);
+
     pub fn into_block_parts(&self) -> (BlockIndex, BlockOffset) {
         let index = (self.0 >> 16) as u16;
         let offset = (self.0 & 0xFFFF) as u16;
         (BlockIndex(index), BlockOffset(offset))
     }
 
-    /// Add some word offset to the address, returning a new address
-    /// and a [`bool`] indicating overflow.
-    pub fn overflowing_add(self, word_offset: u32) -> (ByteAddress, bool) {
-        let (byte_offset, offset_overflow) = word_offset.overflowing_mul(WORD_SIZE_BYTES);
-        let (new_byte_addr, addr_overflow) = self.0.overflowing_add(byte_offset);
-        (ByteAddress(new_byte_addr), offset_overflow || addr_overflow)
+    pub const fn from_u32(addr: u32) -> Self {
+        Self(addr)
     }
 
-    /// Add some signed word offset to the address, returning a new address
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+
+    /// Add some word offset to a byte address, returning a new byte address
     /// and a [`bool`] indicating overflow.
-    pub fn overflowing_add_signed(self, word_offset: i32) -> (ByteAddress, bool) {
-        let byte_offset = (word_offset as i64) * (WORD_SIZE_BYTES as i64);
+    pub fn overflowing_add_words(self, word_offset: WordOffset) -> (ByteAddress, bool) {
+        let byte_offset = (word_offset.0 as i64) * (WORD_SIZE_BYTES as i64);
         let total = (self.0 as i64) + byte_offset;
         let overflow = !(0..=((u32::MAX) as i64)).contains(&total);
         let wrapped = total.rem_euclid((u32::MAX as i64) + 1) as u32;
         (ByteAddress(wrapped), overflow)
+    }
+
+    pub fn next_word(self) -> (ByteAddress, bool) {
+        self.overflowing_add_words(WordOffset::words(1))
+    }
+}
+
+impl WordAddress {
+    pub const fn words(index: u32) -> Self {
+        Self(index)
+    }
+
+    pub fn as_byte_address(self) -> ByteAddress {
+        let (addr, overflow) = self.0.overflowing_mul(WORD_SIZE_BYTES);
+        if overflow {
+            panic!("word address overflowed");
+        }
+        ByteAddress(addr)
+    }
+
+    pub fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
+impl WordOffset {
+    pub const fn words(offset: i32) -> Self {
+        Self(offset)
+    }
+
+    pub const fn from_immediate(immediate: u16) -> Self {
+        Self(immediate as i16 as i32)
     }
 }
 
 impl From<BlockOffset> for usize {
     fn from(val: BlockOffset) -> Self {
         val.0 as usize
+    }
+}
+
+impl From<ByteAddress> for u32 {
+    fn from(val: ByteAddress) -> Self {
+        val.as_u32()
     }
 }
 
@@ -365,7 +411,7 @@ pub type ExecuteResult = Result<(Instruction, InstructionOutcome), InstructionEr
 impl Machine {
     pub fn new() -> Machine {
         let mut m = Machine {
-            program_counter: ByteAddress(0),
+            program_counter: ByteAddress::ZERO,
             regs: [0u32; REGISTER_COUNT],
             blocks: std::iter::repeat_with(|| Block::Empty)
                 .take(BLOCK_COUNT)
@@ -382,12 +428,11 @@ impl Machine {
         let mut m = Machine::new();
         let blocks = m.blocks.as_mut_slice();
 
-        let mut addr = ByteAddress(0);
+        let mut addr = WordAddress::words(0);
         for i in instructions {
-            let (idx, offset) = addr.into_block_parts();
+            let (idx, offset) = addr.as_byte_address().into_block_parts();
             blocks[usize::from(idx)].set_instruction(i.clone(), offset);
-            // Each instruction is 4 bytes.
-            addr.0 += 4;
+            addr = addr.next();
         }
 
         m
@@ -407,18 +452,18 @@ impl Machine {
 
     pub fn set_program_counter(&mut self, addr: ByteAddress) {
         self.program_counter = addr;
-        if self.program_counter.0 as usize >= BLOCK_COUNT * BLOCK_SIZE {
+        if self.program_counter.as_u32() as usize >= BLOCK_COUNT * BLOCK_SIZE {
             panic!("tried to set the program counter to outside of the machine's memory");
         }
     }
 
-    pub fn add_program_counter_signed(&mut self, word_offset: i32) {
-        let (addr, _) = self.program_counter.overflowing_add_signed(word_offset);
+    pub fn add_program_counter(&mut self, word_offset: WordOffset) {
+        let (addr, _) = self.program_counter.overflowing_add_words(word_offset);
         self.set_program_counter(addr);
     }
 
     pub fn advance(&mut self) {
-        let (addr, _) = self.program_counter.overflowing_add(1);
+        let (addr, _) = self.program_counter.next_word();
         self.set_program_counter(addr);
     }
 
@@ -437,8 +482,8 @@ impl Machine {
         block.read_word(offset)
     }
 
-    pub fn instruction_at(&self, word_addr: ByteAddress) -> Result<Instruction, InstructionError> {
-        let inst = self.read_word(word_addr.into());
+    pub fn instruction_at(&self, addr: ByteAddress) -> Result<Instruction, InstructionError> {
+        let inst = self.read_word(addr);
         Instruction::decode(inst)
     }
 
@@ -491,33 +536,34 @@ impl Machine {
         let r_r = self.register(rr);
         let r_a = self.register(ra);
         let mut jumped = false;
+        let word_offset = WordOffset::from_immediate(imm);
 
         let result = match op.opcode() {
             Op::ADDI_CODE => Some(r_a.wrapping_add(imm as u32)),
             Op::SUBI_CODE => Some(r_a.wrapping_sub(imm as u32)),
             Op::JMP_CODE => {
-                let (ret, _) = self.program_counter.overflowing_add(1);
-                self.add_program_counter_signed(imm as i16 as i32);
+                let (ret, _) = self.program_counter.next_word();
+                self.add_program_counter(word_offset);
                 jumped = true;
-                Some(ret.0)
+                Some(ret.as_u32())
             }
             Op::JMPR_CODE => {
-                let (ret, _) = self.program_counter.overflowing_add(1);
-                let (addr, _) = ByteAddress(r_a).overflowing_add_signed(imm as i16 as i32);
+                let (ret, _) = self.program_counter.next_word();
+                let (addr, _) = ByteAddress::from_u32(r_a).overflowing_add_words(word_offset);
                 self.set_program_counter(addr);
                 jumped = true;
-                Some(ret.0)
+                Some(ret.as_u32())
             }
             Op::BEQ_CODE => {
                 if r_r == r_a {
-                    self.add_program_counter_signed(imm as i16 as i32);
+                    self.add_program_counter(word_offset);
                     jumped = true;
                 }
                 None
             }
             Op::BNE_CODE => {
                 if r_r != r_a {
-                    self.add_program_counter_signed(imm as i16 as i32);
+                    self.add_program_counter(word_offset);
                     jumped = true;
                 }
                 None
@@ -688,7 +734,7 @@ mod tests {
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
-        assert_eq!(m.register(1), 4);
+        assert_eq!(m.register(1), WordAddress::words(1).as_byte_address().as_u32());
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
@@ -705,11 +751,11 @@ mod tests {
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
-        m.set_register(3, 4);
+        m.set_register(3, WordAddress::words(1).as_byte_address().as_u32());
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
-        assert_eq!(m.register(1), 4);
+        assert_eq!(m.register(1), WordAddress::words(1).as_byte_address().as_u32());
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
