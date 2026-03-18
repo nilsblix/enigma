@@ -255,23 +255,32 @@ pub const BLOCK_COUNT: usize = 1 << 16;
 pub const REGISTER_COUNT: usize = 32;
 pub const WORD_SIZE_BYTES: u32 = 4;
 
+/// A block of byte-addressed contiguous virtual machine memory.
+///
+/// Memory for a block is not allocated unless a non-zero
+/// value is written within the block.
 pub enum Block {
     Empty,
     Memory(Box<[u8; BLOCK_SIZE]>),
 }
 
+/// A byte-granular address in the machine's flat memory space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ByteAddress(u32);
 
+/// An instruction index measured in 32-bit words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WordAddress(u32);
 
+/// A signed displacement measured in 32-bit words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WordOffset(i32);
 
+/// Selects one 64KiB memory block within the sparse address space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockIndex(u16);
 
+/// A byte offset within a single 64KiB memory block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockOffset(u16);
 
@@ -467,7 +476,6 @@ impl Machine {
         self.set_program_counter(addr);
     }
 
-    // TODO should this init the block if the index doesn't exist?
     pub fn block(&self, block_index: BlockIndex) -> &Block {
         &self.blocks[usize::from(block_index)]
     }
