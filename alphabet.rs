@@ -201,6 +201,11 @@ pub enum InstructionError {
 }
 
 impl Instruction {
+    pub const HALT: Instruction = Instruction{
+        op: Op::JMP,
+        payload: Payload::I{ rr: 0, ra: 0, immediate: 0 },
+    };
+
     pub const OPCODE_OFFSET: usize = 26;
 
     /// Each instruction is stored as either an R-type (register mode) or
@@ -599,6 +604,15 @@ impl Machine {
             self.advance();
         }
         Ok((instruction, result))
+    }
+
+    pub fn execute_while_not_halt(&mut self) -> Result<(), InstructionError> {
+        loop {
+            let (inst, _) = self.execute_and_advance()?;
+            if inst == Instruction::HALT {
+                return Ok(());
+            }
+        }
     }
 }
 
