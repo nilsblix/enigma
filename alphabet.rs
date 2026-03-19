@@ -1,9 +1,69 @@
 // FIX Remove
 #![allow(dead_code)]
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Op(u8);
+pub enum Op {
+    Noop = 0x00,
 
+    // --- R-modes ---
+
+    /// Signed and unsigned addition.
+    Add  = 0x01,
+    /// Signed and unsigned subtraction.
+    Sub  = 0x02,
+    /// Logical bitshift left.
+    Shl  = 0x03,
+    /// Logical bitshift right.
+    Shr  = 0x04,
+    /// Logical bitwise or.
+    Or   = 0x05,
+    /// Logical bitwise and.
+    And  = 0x06,
+    /// Logical bitwise exclusive-or.
+    Xor  = 0x07,
+    /// Less-than signed comparison.
+    Slt  = 0x08,
+    /// Less-than unsigned comparison
+    Sltu = 0x09,
+
+    // --- I-modes ---
+
+    /// Immediate unsigned value addition.
+    Addi  = 0x21,
+    /// Immediate unsigned value subtraction.
+    Subi  = 0x22,
+    /// Immediate logical bitshift left.
+    Shli  = 0x23,
+    /// Immediate logical bitshift right.
+    Shri  = 0x24,
+    /// Logical bitwise or for lower 16 bits.
+    Ori   = 0x25,
+    /// Logical bitwise or for upper 16 bits.
+    Orui  = 0x26,
+    /// Logical bitwise and for lower 16 bits.
+    Andi  = 0x27,
+    /// Logical bitwise and for upper 16 bits.
+    Andui = 0x28,
+    /// Logical bitwise exclusive-or for lower 16 bits.
+    Xori  = 0x29,
+    /// Logical bitwise exclusive-or for upper 16 bits.
+    Xorui = 0x2a,
+    /// Less-than immediate signed comparison.
+    Slti  = 0x2b,
+    /// Less-than immediate unsigned comparison.
+    Sltui = 0x2c,
+    /// Jump and link by offset.
+    Jmp   = 0x39,
+    /// Jump and link relative to register.
+    Jmpr  = 0x3A,
+    /// Branch by offset if equal.
+    Beq   = 0x3B,
+    /// Branch by offset if not equal.
+    Bne   = 0x3C,
+}
+
+#[derive(PartialEq)]
 enum Encoding {
     Noop,
     R,
@@ -11,143 +71,72 @@ enum Encoding {
 }
 
 impl Op {
-    pub const COUNT: usize = 1 << 6;
+    pub fn name(self) -> &'static str {
+        match self {
+            Op::Noop => "noop",
 
-    pub const NOOP_CODE: u8 = 0x00;
-    pub const NOOP: Self = Self(Self::NOOP_CODE);
+            // Rs
+            Op::Add  => "add",
+            Op::Sub  => "sub",
+            Op::Shl  => "shl",
+            Op::Shr  => "shr",
+            Op::Or   => "or",
+            Op::And  => "and",
+            Op::Xor  => "xor",
+            Op::Slt  => "slt",
+            Op::Sltu => "sltu",
 
-    pub const ADD_CODE: u8 = 0x01;
-    pub const ADD: Self = Self(Self::ADD_CODE);
-
-    pub const SUB_CODE: u8 = 0x02;
-    pub const SUB: Self = Self(Self::SUB_CODE);
-
-    pub const SHL_CODE: u8 = 0x03;
-    pub const SHL: Self = Self(Self::SHL_CODE);
-
-    pub const SHR_CODE: u8 = 0x04;
-    pub const SHR: Self = Self(Self::SHR_CODE);
-
-    pub const ADDI_CODE: u8 = 0x21;
-    pub const ADDI: Self = Self(Self::ADDI_CODE);
-
-    pub const SUBI_CODE: u8 = 0x22;
-    pub const SUBI: Self = Self(Self::SUBI_CODE);
-
-    /// Jump and link by offset.
-    pub const JMP_CODE: u8 = 0x39;
-    pub const JMP: Self = Self(Self::JMP_CODE);
-
-    /// Jump and link relative to register.
-    pub const JMPR_CODE: u8 = 0x3A;
-    pub const JMPR: Self = Self(Self::JMPR_CODE);
-
-    /// Branch by offset if equal.
-    pub const BEQ_CODE: u8 = 0x3B;
-    pub const BEQ: Self = Self(Self::BEQ_CODE);
-
-    /// Branch by offset if not equal.
-    pub const BNE_CODE: u8 = 0x3C;
-    pub const BNE: Self = Self(Self::BNE_CODE);
-
-    pub const NAMES: [Option<&'static str>; Op::COUNT] = [
-        Some("noop"), // 0x00
-        Some("add"),  // 0x01
-        Some("sub"),  // 0x02
-        Some("shl"),  // 0x03
-        Some("shr"),  // 0x04
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some("addi"), // 0x21
-        Some("subi"), // 0x22
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some("jmp"),   // 0x39
-        Some("jmpr"),  // 0x3A
-        Some("beq"),   // 0x3B
-        Some("bne"),   // 0x3C
-        None,
-        None,
-        None,
-    ];
-
-    const fn new(opcode: u8) -> Option<Self> {
-        if Op::is_valid_opcode(opcode) {
-            Some(Op(opcode))
-        } else {
-            None
+            // Is
+            Op::Addi  => "add_i",
+            Op::Subi  => "sub_i",
+            Op::Shli  => "shl_i",
+            Op::Shri  => "shr_i",
+            Op::Ori   => "or_i",
+            Op::Orui  => "oru_i",
+            Op::Andi  => "and_i",
+            Op::Andui => "andu_i",
+            Op::Xori  => "xor_i",
+            Op::Xorui => "xoru_i",
+            Op::Slti  => "slt_i",
+            Op::Sltui => "sltu_i",
+            Op::Jmp   => "jmp_i",
+            Op::Jmpr  => "jmpr_i",
+            Op::Beq   => "beq_i",
+            Op::Bne   => "bne_i",
         }
     }
 
-    const fn name(&self) -> &'static str {
-        Op::NAMES[self.opcode() as usize].expect("invalid op")
+    pub const fn opcode(self) -> u8 {
+        self as u8
     }
 
-    const fn is_valid_opcode(opcode: u8) -> bool {
-        let opcode = opcode as usize;
-        if opcode >= Op::COUNT {
-            return false;
-        }
-        Op::NAMES[opcode].is_some()
-    }
-
-    const fn opcode(&self) -> u8 {
-        self.0
-    }
-
-    const fn encoding(&self) -> Encoding {
-        const COUNT: u8 = Op::COUNT as u8;
+    const fn encoding(self) -> Encoding {
         match self.opcode() {
-            Op::NOOP_CODE => Encoding::Noop,
+            0 => Encoding::Noop,
             0x01..=0x1F => Encoding::R,
             0x20..=0x3F => Encoding::I,
-            COUNT.. => panic!("invalid op"),
+            _ => panic!("unreachable opcode"),
+        }
+    }
+}
+
+impl TryFrom<u8> for Op {
+    type Error = ();
+
+    fn try_from(opcode: u8) -> Result<Self, Self::Error> {
+        match opcode {
+            0x00 => Ok(Op::Noop),
+            0x01 => Ok(Op::Add),
+            0x02 => Ok(Op::Sub),
+            0x03 => Ok(Op::Shl),
+            0x04 => Ok(Op::Shr),
+            0x21 => Ok(Op::Addi),
+            0x22 => Ok(Op::Subi),
+            0x39 => Ok(Op::Jmp),
+            0x3A => Ok(Op::Jmpr),
+            0x3B => Ok(Op::Beq),
+            0x3C => Ok(Op::Bne),
+            _ => Err(()),
         }
     }
 }
@@ -171,14 +160,12 @@ impl Payload {
     pub const fn encode(&self) -> u32 {
         match self {
             Payload::Noop => 0x00000000,
-            Payload::R{rr, ra, rb} =>
-                ((*rr as u32) << 21)
-                | ((*ra as u32) << 16)
-                | ((*rb as u32) << 11),
-            Payload::I{rr, ra, immediate} =>
-                ((*rr as u32) << 21)
-                | ((*ra as u32) << 16)
-                | (*immediate as u32)
+            Payload::R { rr, ra, rb } => {
+                ((*rr as u32) << 21) | ((*ra as u32) << 16) | ((*rb as u32) << 11)
+            }
+            Payload::I { rr, ra, immediate } => {
+                ((*rr as u32) << 21) | ((*ra as u32) << 16) | (*immediate as u32)
+            }
         }
     }
 }
@@ -195,15 +182,17 @@ pub const IMMEDIATE_MASK: u32 = 0xFFFF;
 
 #[derive(Debug)]
 pub enum InstructionError {
-    InvalidOperation {
-        opcode: u8,
-    }
+    InvalidOperation { opcode: u8 },
 }
 
 impl Instruction {
-    pub const HALT: Instruction = Instruction{
-        op: Op::JMP,
-        payload: Payload::I{ rr: 0, ra: 0, immediate: 0 },
+    pub const HALT: Instruction = Instruction {
+        op: Op::Jmp,
+        payload: Payload::I {
+            rr: 0,
+            ra: 0,
+            immediate: 0,
+        },
     };
 
     pub const OPCODE_OFFSET: usize = 26;
@@ -230,24 +219,23 @@ impl Instruction {
     ///  opcode  rr    ra       immediate
     pub fn decode(word: u32) -> Result<Instruction, InstructionError> {
         let opcode = ((word >> Instruction::OPCODE_OFFSET) & OPCODE_MASK) as u8;
-        let op = Op::new(opcode)
-            .ok_or(InstructionError::InvalidOperation { opcode })?;
+        let op = Op::try_from(opcode).map_err(|_| InstructionError::InvalidOperation { opcode })?;
         let payload = match op.encoding() {
             Encoding::Noop => Payload::Noop,
             Encoding::R => {
                 let rr = ((word >> 21) & REGISTER_MASK) as usize;
                 let ra = ((word >> 16) & REGISTER_MASK) as usize;
                 let rb = ((word >> 11) & REGISTER_MASK) as usize;
-                Payload::R{ rr, ra, rb }
-            },
+                Payload::R { rr, ra, rb }
+            }
             Encoding::I => {
                 let rr = ((word >> 21) & REGISTER_MASK) as usize;
                 let ra = ((word >> 16) & REGISTER_MASK) as usize;
                 let immediate = (word & IMMEDIATE_MASK) as u16;
-                Payload::I{ rr, ra, immediate }
-            },
+                Payload::I { rr, ra, immediate }
+            }
         };
-        Ok(Instruction{ op, payload })
+        Ok(Instruction { op, payload })
     }
 
     pub const fn encode(&self) -> u32 {
@@ -372,11 +360,11 @@ impl Block {
         let bytes = match self {
             Block::Empty => {
                 return 0;
-            },
+            }
             Block::Memory(mem) => {
                 let u = usize::from(offset);
-                [ mem[u], mem[u + 1], mem[u + 2], mem[u + 3] ]
-            },
+                [mem[u], mem[u + 1], mem[u + 2], mem[u + 3]]
+            }
         };
         u32::from_be_bytes(bytes)
     }
@@ -386,7 +374,7 @@ impl Block {
             Block::Empty => {
                 *self = Block::Memory(Box::new([0u8; BLOCK_SIZE]));
                 self.set_byte(byte, offset);
-            },
+            }
             Block::Memory(mem) => mem[usize::from(offset)] = byte,
         }
     }
@@ -432,7 +420,7 @@ impl Machine {
                 .collect::<Vec<_>>()
                 .try_into()
                 .map_err(|_| ())
-                .expect("failed to initialize memory-blocks")
+                .expect("failed to initialize memory-blocks"),
         };
         m.regs[SP_INDEX] = STACK_BEGINNING;
         m
@@ -510,78 +498,101 @@ impl Machine {
         use Payload::*;
         match inst.payload {
             Noop => InstructionOutcome { jumped: false },
-            R{rr, ra, rb} => self.exec_r_type(op, rr, ra, rb),
-            I{rr, ra, immediate} => self.exec_i_type(op, rr, ra, immediate),
+            R { rr, ra, rb } => self.exec_r_type(op, rr, ra, rb),
+            I { rr, ra, immediate } => self.exec_i_type(op, rr, ra, immediate),
         }
     }
 
     const SHIFT_MASK: u32 = 0x1F;
 
-    pub fn exec_r_type(
-        &mut self,
-        op: Op,
-        rr: usize,
-        ra: usize,
-        rb: usize,
-    ) -> InstructionOutcome {
+    pub fn exec_r_type(&mut self, op: Op, rr: usize, ra: usize, rb: usize) -> InstructionOutcome {
         let r_a = self.register(ra);
         let r_b = self.register(rb);
 
-        let result = match op.opcode() {
-            Op::ADD_CODE => r_a.wrapping_add(r_b),
-            Op::SUB_CODE => r_a.wrapping_sub(r_b),
-            Op::SHL_CODE => r_a << (r_b & Self::SHIFT_MASK),
-            Op::SHR_CODE => r_a >> (r_b & Self::SHIFT_MASK),
-            _ => panic!("invalid R-type opcode"),
+        let result = match op {
+            Op::Add => r_a.wrapping_add(r_b),
+            Op::Sub => r_a.wrapping_sub(r_b),
+            Op::Shl => r_a << (r_b & Self::SHIFT_MASK),
+            Op::Shr => r_a >> (r_b & Self::SHIFT_MASK),
+            Op::Or  => r_a | r_b,
+            Op::And => r_a & r_b,
+            Op::Xor => r_a ^ r_b,
+            Op::Slt => {
+                if (r_a as i32) < (r_b as i32) {
+                    1
+                } else {
+                    0
+                }
+            },
+            Op::Sltu => {
+                if r_a < r_b {
+                    1
+                } else {
+                    0
+                }
+            },
+            Op::Noop | o if o.encoding() == Encoding::I => {
+                panic!("invalid R-type opcode: {}", op.name())
+            },
         };
 
         self.set_register(rr, result);
         InstructionOutcome { jumped: false }
     }
 
-    pub fn exec_i_type(
-        &mut self,
-        op: Op,
-        rr: usize,
-        ra: usize,
-        imm: u16
-    ) -> InstructionOutcome {
+    pub fn exec_i_type(&mut self, op: Op, rr: usize, ra: usize, imm: u16) -> InstructionOutcome {
         let r_r = self.register(rr);
         let r_a = self.register(ra);
         let mut jumped = false;
         let word_offset = WordOffset::from_immediate(imm);
 
-        let result = match op.opcode() {
-            Op::ADDI_CODE => Some(r_a.wrapping_add(imm as u32)),
-            Op::SUBI_CODE => Some(r_a.wrapping_sub(imm as u32)),
-            Op::JMP_CODE => {
+        let result = match op {
+            Op::Addi  => Some(r_a.wrapping_add(imm as u32)),
+            Op::Subi  => Some(r_a.wrapping_sub(imm as u32)),
+            Op::Shli => Some(r_a << (imm & Self::SHIFT_MASK as u16)),
+            Op::Shri => Some(r_a >> (imm & Self::SHIFT_MASK as u16)),
+            Op::Andi => Some(r_a & (imm as u32 | 0xFFFF0000)),
+            Op::Andui => Some(r_a & ((imm as u32) << 16) | 0x0000FFFF),
+            Op::Ori => Some(r_a | (imm as u32)),
+            Op::Orui => Some(r_a | ((imm as u32) << 16)),
+            Op::Xori => Some(r_a ^ (imm as u32)),
+            Op::Xorui => Some(r_a ^ ((imm as u32) << 16)),
+            Op::Slti => Some(if (r_a as i32) < (imm as i16 as i32) {
+                1
+            } else {
+                0
+            }),
+            Op::Sltui => Some(if r_a < imm as u32 { 1 } else { 0 }),
+            Op::Jmp => {
                 let (ret, _) = self.program_counter.next_word();
                 self.add_program_counter(word_offset);
                 jumped = true;
                 Some(ret.as_u32())
             }
-            Op::JMPR_CODE => {
+            Op::Jmpr => {
                 let (ret, _) = self.program_counter.next_word();
                 let (addr, _) = ByteAddress::from_u32(r_a).overflowing_add_words(word_offset);
                 self.set_program_counter(addr);
                 jumped = true;
                 Some(ret.as_u32())
             }
-            Op::BEQ_CODE => {
+            Op::Beq => {
                 if r_r == r_a {
                     self.add_program_counter(word_offset);
                     jumped = true;
                 }
                 None
             }
-            Op::BNE_CODE => {
+            Op::Bne => {
                 if r_r != r_a {
                     self.add_program_counter(word_offset);
                     jumped = true;
                 }
                 None
             }
-            _ => panic!("invalid I-type opcode"),
+            Op::Noop | o if o.encoding() == Encoding::R => {
+                panic!("invalid R-type opcode: {}", op.name())
+            },
         };
 
         if let Some(result) = result {
@@ -597,7 +608,7 @@ impl Machine {
             Err(err) => {
                 self.advance();
                 return Err(err);
-            },
+            }
         };
         let result = self.execute(&instruction);
         if !result.jumped {
@@ -631,7 +642,7 @@ mod tests {
         //          |     V    V    V    V           |
         let word = 0b00000010000010100010011111111111 as u32;
         let inst = Instruction {
-            op: Op::NOOP,
+            op: Op::Noop,
             payload: Payload::Noop,
         };
         let res = Instruction::decode(word).unwrap();
@@ -643,7 +654,7 @@ mod tests {
         //          |     V    V    V    V           |
         let word = 0b00000110000010100010111111111111 as u32;
         let inst = Instruction {
-            op: Op::ADD,
+            op: Op::Add,
             payload: Payload::R {
                 rr: 16,
                 ra: 10,
@@ -659,7 +670,7 @@ mod tests {
         //          |     V    V    V                |
         let word = 0b10001010000010100000000010010101 as u32;
         let inst = Instruction {
-            op: Op::SUBI,
+            op: Op::Subi,
             payload: Payload::I {
                 rr: 16,
                 ra: 10,
@@ -675,7 +686,7 @@ mod tests {
         //          |     V    V    V                |
         let word = 0b11100110000010100000000010010101 as u32;
         let inst = Instruction {
-            op: Op::JMP,
+            op: Op::Jmp,
             payload: Payload::I {
                 rr: 16,
                 ra: 10,
@@ -720,10 +731,34 @@ mod tests {
         //
         // i.e the noop should not be executed.
         let instructions = [
-            Instruction{ op: Op::ADD, payload: Payload::R{ rr: 1, ra: 2, rb: 3 }},
-            Instruction{ op: Op::BEQ, payload: Payload::I{ rr: 1, ra: 4, immediate: 2 }},
-            Instruction{ op: Op::NOOP, payload: Payload::Noop},
-            Instruction{ op: Op::SHL, payload: Payload::R{ rr: 6, ra: 1, rb: 5 }},
+            Instruction {
+                op: Op::Add,
+                payload: Payload::R {
+                    rr: 1,
+                    ra: 2,
+                    rb: 3,
+                },
+            },
+            Instruction {
+                op: Op::Beq,
+                payload: Payload::I {
+                    rr: 1,
+                    ra: 4,
+                    immediate: 2,
+                },
+            },
+            Instruction {
+                op: Op::Noop,
+                payload: Payload::Noop,
+            },
+            Instruction {
+                op: Op::Shl,
+                payload: Payload::R {
+                    rr: 6,
+                    ra: 1,
+                    rb: 5,
+                },
+            },
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
@@ -747,16 +782,36 @@ mod tests {
     #[test]
     fn jump_and_link_uses_word_offsets() {
         let instructions = [
-            Instruction{ op: Op::JMP, payload: Payload::I{ rr: 1, ra: 0, immediate: 2 }},
-            Instruction{ op: Op::NOOP, payload: Payload::Noop },
-            Instruction{ op: Op::ADDI, payload: Payload::I{ rr: 2, ra: 0, immediate: 9 }},
+            Instruction {
+                op: Op::Jmp,
+                payload: Payload::I {
+                    rr: 1,
+                    ra: 0,
+                    immediate: 2,
+                },
+            },
+            Instruction {
+                op: Op::Noop,
+                payload: Payload::Noop,
+            },
+            Instruction {
+                op: Op::Addi,
+                payload: Payload::I {
+                    rr: 2,
+                    ra: 0,
+                    immediate: 9,
+                },
+            },
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
-        assert_eq!(m.register(1), WordAddress::words(1).as_byte_address().as_u32());
+        assert_eq!(
+            m.register(1),
+            WordAddress::words(1).as_byte_address().as_u32()
+        );
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
@@ -766,10 +821,30 @@ mod tests {
     #[test]
     fn register_relative_jump_uses_word_offsets() {
         let instructions = [
-            Instruction{ op: Op::JMPR, payload: Payload::I{ rr: 1, ra: 3, immediate: 2 }},
-            Instruction{ op: Op::NOOP, payload: Payload::Noop },
-            Instruction{ op: Op::NOOP, payload: Payload::Noop },
-            Instruction{ op: Op::ADDI, payload: Payload::I{ rr: 2, ra: 0, immediate: 11 }},
+            Instruction {
+                op: Op::Jmpr,
+                payload: Payload::I {
+                    rr: 1,
+                    ra: 3,
+                    immediate: 2,
+                },
+            },
+            Instruction {
+                op: Op::Noop,
+                payload: Payload::Noop,
+            },
+            Instruction {
+                op: Op::Noop,
+                payload: Payload::Noop,
+            },
+            Instruction {
+                op: Op::Addi,
+                payload: Payload::I {
+                    rr: 2,
+                    ra: 0,
+                    immediate: 11,
+                },
+            },
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
@@ -777,7 +852,10 @@ mod tests {
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
-        assert_eq!(m.register(1), WordAddress::words(1).as_byte_address().as_u32());
+        assert_eq!(
+            m.register(1),
+            WordAddress::words(1).as_byte_address().as_u32()
+        );
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
