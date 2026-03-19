@@ -6,7 +6,7 @@
 pub enum Op {
     Noop = 0x00,
 
-    // --- R-modes ---
+    // --- R-types ---
 
     /// Signed and unsigned addition.
     Add  = 0x01,
@@ -27,7 +27,7 @@ pub enum Op {
     /// Less-than unsigned comparison
     Sltu = 0x09,
 
-    // --- I-modes ---
+    // --- I-types ---
 
     /// Immediate unsigned value addition.
     Addi  = 0x21,
@@ -74,7 +74,6 @@ impl Op {
     pub fn name(self) -> &'static str {
         match self {
             Op::Noop => "noop",
-
             // Rs
             Op::Add  => "add",
             Op::Sub  => "sub",
@@ -85,7 +84,6 @@ impl Op {
             Op::Xor  => "xor",
             Op::Slt  => "slt",
             Op::Sltu => "sltu",
-
             // Is
             Op::Addi  => "add_i",
             Op::Subi  => "sub_i",
@@ -126,12 +124,29 @@ impl TryFrom<u8> for Op {
     fn try_from(opcode: u8) -> Result<Self, Self::Error> {
         match opcode {
             0x00 => Ok(Op::Noop),
+            // Rs
             0x01 => Ok(Op::Add),
             0x02 => Ok(Op::Sub),
             0x03 => Ok(Op::Shl),
             0x04 => Ok(Op::Shr),
+            0x05 => Ok(Op::Or),
+            0x06 => Ok(Op::And),
+            0x07 => Ok(Op::Xor),
+            0x08 => Ok(Op::Slt),
+            0x09 => Ok(Op::Sltu),
+            // Is
             0x21 => Ok(Op::Addi),
             0x22 => Ok(Op::Subi),
+            0x23 => Ok(Op::Shli),
+            0x24 => Ok(Op::Shri),
+            0x25 => Ok(Op::Ori),
+            0x26 => Ok(Op::Orui),
+            0x27 => Ok(Op::Andi),
+            0x28 => Ok(Op::Andui),
+            0x29 => Ok(Op::Xori),
+            0x2a => Ok(Op::Xorui),
+            0x2b => Ok(Op::Slti),
+            0x2c => Ok(Op::Sltui),
             0x39 => Ok(Op::Jmp),
             0x3A => Ok(Op::Jmpr),
             0x3B => Ok(Op::Beq),
@@ -531,9 +546,7 @@ impl Machine {
                     0
                 }
             },
-            Op::Noop | o if o.encoding() == Encoding::I => {
-                panic!("invalid R-type opcode: {}", op.name())
-            },
+            _ => panic!("invalid R-type opcode: {}", op.name()),
         };
 
         self.set_register(rr, result);
@@ -590,9 +603,7 @@ impl Machine {
                 }
                 None
             }
-            Op::Noop | o if o.encoding() == Encoding::R => {
-                panic!("invalid R-type opcode: {}", op.name())
-            },
+            _ => panic!("invalid I-type opcode: {}", op.name()),
         };
 
         if let Some(result) = result {
@@ -679,7 +690,7 @@ mod tests {
         };
         let res = Instruction::decode(word).unwrap();
         assert_eq!(res, inst);
-        assert_eq!(res.op.name(), "subi");
+        assert_eq!(res.op.name(), "sub_i");
         assert_eq!(res.encode(), word);
 
         //          |  op | rr | ra |    immediate   |
@@ -695,7 +706,7 @@ mod tests {
         };
         let res = Instruction::decode(word).unwrap();
         assert_eq!(res, inst);
-        assert_eq!(res.op.name(), "jmp");
+        assert_eq!(res.op.name(), "jmp_i");
         assert_eq!(res.encode(), word);
     }
 
