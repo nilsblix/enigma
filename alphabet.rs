@@ -5,9 +5,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Noop = 0x00,
-
-    // --- R-types ---
-
+    // ========== R-types ==========
+    //
     /// Signed and unsigned addition.
     Add  = 0x01,
     /// Signed and unsigned subtraction.
@@ -26,9 +25,8 @@ pub enum Op {
     Slt  = 0x08,
     /// Less-than unsigned comparison
     Sltu = 0x09,
-
-    // --- I-types ---
-
+    // ========== I-types ==========
+    //
     /// Immediate unsigned value addition.
     Addi  = 0x21,
     /// Immediate unsigned value subtraction.
@@ -53,6 +51,22 @@ pub enum Op {
     Slti  = 0x2b,
     /// Less-than immediate unsigned comparison.
     Sltui = 0x2c,
+    /// Load word from memory.
+    Ldw   = 0x31,
+    /// Load half-word from memory.
+    Ldhw  = 0x32,
+    /// Load unsigned half-word from memory.
+    Ldhwu = 0x33,
+    /// Load byte from memory.
+    Ldb   = 0x34,
+    /// Load unsigned byte from memory.
+    Ldbu  = 0x35,
+    /// Store word to memory.
+    Stw   = 0x36,
+    /// Store half-word to memory.
+    Sthw  = 0x37,
+    /// Store byte to memory.
+    Stb   = 0x38,
     /// Jump and link by offset.
     Jmp   = 0x39,
     /// Jump and link relative to register.
@@ -97,6 +111,14 @@ impl Op {
             Op::Xorui => "xoru_i",
             Op::Slti  => "slt_i",
             Op::Sltui => "sltu_i",
+            Op::Ldw   => "ldw_i",
+            Op::Ldhw  => "ldhw_i",
+            Op::Ldhwu => "ldhwu_i",
+            Op::Ldb   => "ldb_i",
+            Op::Ldbu  => "ldbu_i",
+            Op::Stw   => "stw_i",
+            Op::Sthw  => "sthw_i",
+            Op::Stb   => "stb_i",
             Op::Jmp   => "jmp_i",
             Op::Jmpr  => "jmpr_i",
             Op::Beq   => "beq_i",
@@ -147,6 +169,14 @@ impl TryFrom<u8> for Op {
             0x2a => Ok(Op::Xorui),
             0x2b => Ok(Op::Slti),
             0x2c => Ok(Op::Sltui),
+            0x31 => Ok(Op::Ldw),
+            0x32 => Ok(Op::Ldhw),
+            0x33 => Ok(Op::Ldhwu),
+            0x34 => Ok(Op::Ldb),
+            0x35 => Ok(Op::Ldbu),
+            0x36 => Ok(Op::Stw),
+            0x37 => Ok(Op::Sthw),
+            0x38 => Ok(Op::Stb),
             0x39 => Ok(Op::Jmp),
             0x3A => Ok(Op::Jmpr),
             0x3B => Ok(Op::Beq),
@@ -362,20 +392,52 @@ impl Instruction {
         Instruction::i_type(Op::Sltui, rr, ra, imm)
     }
 
-    pub fn jmp(rr: usize, ra: usize, imm: u16) -> Instruction {
-        Instruction::i_type(Op::Jmp, rr, ra, imm)
+    pub fn ldw(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Ldw, rr, ra, imm as u16)
     }
 
-    pub fn jmpr(rr: usize, ra: usize, imm: u16) -> Instruction {
-        Instruction::i_type(Op::Jmpr, rr, ra, imm)
+    pub fn ldhw(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Ldhw, rr, ra, imm as u16)
     }
 
-    pub fn beq(rr: usize, ra: usize, imm: u16) -> Instruction {
-        Instruction::i_type(Op::Beq, rr, ra, imm)
+    pub fn ldhwu(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Ldhwu, rr, ra, imm as u16)
     }
 
-    pub fn bne(rr: usize, ra: usize, imm: u16) -> Instruction {
-        Instruction::i_type(Op::Bne, rr, ra, imm)
+    pub fn ldb(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Ldb, rr, ra, imm as u16)
+    }
+
+    pub fn ldbu(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Ldbu, rr, ra, imm as u16)
+    }
+
+    pub fn stw(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Stw, rr, ra, imm as u16)
+    }
+
+    pub fn sthw(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Sthw, rr, ra, imm as u16)
+    }
+
+    pub fn stb(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Stb, rr, ra, imm as u16)
+    }
+
+    pub fn jmp(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Jmp, rr, ra, imm as u16)
+    }
+
+    pub fn jmpr(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Jmpr, rr, ra, imm as u16)
+    }
+
+    pub fn beq(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Beq, rr, ra, imm as u16)
+    }
+
+    pub fn bne(rr: usize, ra: usize, imm: i16) -> Instruction {
+        Instruction::i_type(Op::Bne, rr, ra, imm as u16)
     }
 }
 
@@ -396,6 +458,12 @@ pub enum Block {
 /// A byte-granular address in the machine's flat memory space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ByteAddress(u32);
+
+/// A signed displacement measured in 32-bit bytes.
+///
+/// Commonly, ByteOffset = WordOffset * 4
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ByteOffset(i32);
 
 /// An instruction index measured in 32-bit words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -436,18 +504,35 @@ impl ByteAddress {
         self.0
     }
 
-    /// Add some word offset to a byte address, returning a new byte address
+    /// Add some byte offset to a byte address, returning a new byte address
     /// and a [`bool`] indicating overflow.
-    pub fn overflowing_add_words(self, word_offset: WordOffset) -> (ByteAddress, bool) {
-        let byte_offset = (word_offset.0 as i64) * (WORD_SIZE_BYTES as i64);
-        let total = (self.0 as i64) + byte_offset;
+    pub fn overflowing_add_bytes(self, byte_offset: ByteOffset) -> (ByteAddress, bool) {
+        let total = (self.0 as i64) + byte_offset.0 as i64;
         let overflow = !(0..=((u32::MAX) as i64)).contains(&total);
         let wrapped = total.rem_euclid((u32::MAX as i64) + 1) as u32;
         (ByteAddress(wrapped), overflow)
     }
 
+    /// Add some word offset to a byte address, returning a new byte address
+    /// and a [`bool`] indicating overflow.
+    pub fn overflowing_add_words(self, word_offset: WordOffset) -> (ByteAddress, bool) {
+        let (byte_offset, fst) = word_offset.to_byte_offset();
+        let (addr, snd) = self.overflowing_add_bytes(byte_offset);
+        (addr, fst || snd)
+    }
+
     pub fn next_word(self) -> (ByteAddress, bool) {
         self.overflowing_add_words(WordOffset::words(1))
+    }
+}
+
+impl ByteOffset {
+    pub const fn byte_offset(offset: i32) -> Self {
+        Self(offset)
+    }
+
+    pub const fn from_immediate(immediate: u16) -> Self {
+        Self(immediate as i16 as i32)
     }
 }
 
@@ -477,6 +562,13 @@ impl WordOffset {
     pub const fn from_immediate(immediate: u16) -> Self {
         Self(immediate as i16 as i32)
     }
+
+    /// Returns false on overflow.
+    pub fn to_byte_offset(self) -> (ByteOffset, bool) {
+        let byte_offset = (self.0 as i64) * (WORD_SIZE_BYTES as i64);
+        let overflow = !(i32::MIN as i64..=i32::MAX as i64).contains(&byte_offset);
+        (ByteOffset(byte_offset as i32), overflow)
+    }
 }
 
 impl From<BlockOffset> for usize {
@@ -496,6 +588,26 @@ impl Block {
         Block::Memory(Box::new([0u8; BLOCK_SIZE]))
     }
 
+    pub fn read_byte(&self, offset: BlockOffset) -> u8 {
+        match self {
+            Block::Empty => 0,
+            Block::Memory(mem) => mem[usize::from(offset)],
+        }
+    }
+
+    pub fn read_half_word(&self, offset: BlockOffset) -> u16 {
+        let bytes = match self {
+            Block::Empty => {
+                return 0;
+            }
+            Block::Memory(mem) => {
+                let u = usize::from(offset);
+                [mem[u], mem[u + 1]]
+            }
+        };
+        u16::from_be_bytes(bytes)
+    }
+
     pub fn read_word(&self, offset: BlockOffset) -> u32 {
         let bytes = match self {
             Block::Empty => {
@@ -509,26 +621,28 @@ impl Block {
         u32::from_be_bytes(bytes)
     }
 
-    pub fn write_byte(&mut self, byte: u8, offset: BlockOffset) {
+    pub fn write_byte(&mut self, offset: BlockOffset, byte: u8) {
         match self {
             Block::Empty => {
                 *self = Block::new_memory();
-                self.write_byte(byte, offset);
+                self.write_byte(offset, byte);
             }
             Block::Memory(mem) => mem[usize::from(offset)] = byte,
         }
     }
 
-    pub fn write_word(&mut self, word: u32, offset: BlockOffset) {
+    pub fn write_half_word(&mut self, offset: BlockOffset, word: u16) {
         let bytes = word.to_be_bytes();
-        self.write_byte(bytes[0], offset);
-        self.write_byte(bytes[1], BlockOffset(offset.0 + 1));
-        self.write_byte(bytes[2], BlockOffset(offset.0 + 2));
-        self.write_byte(bytes[3], BlockOffset(offset.0 + 3));
+        self.write_byte(offset, bytes[0]);
+        self.write_byte(BlockOffset(offset.0 + 1), bytes[1]);
     }
 
-    pub fn write_instruction(&mut self, inst: Instruction, offset: BlockOffset) {
-        self.write_word(inst.encode(), offset);
+    pub fn write_word(&mut self, offset: BlockOffset, word: u32) {
+        let bytes = word.to_be_bytes();
+        self.write_byte(offset, bytes[0]);
+        self.write_byte(BlockOffset(offset.0 + 1), bytes[1]);
+        self.write_byte(BlockOffset(offset.0 + 2), bytes[2]);
+        self.write_byte(BlockOffset(offset.0 + 3), bytes[3]);
     }
 }
 
@@ -577,7 +691,7 @@ impl Machine {
         let mut addr = WordAddress::words(0);
         for i in instructions {
             let (idx, offset) = addr.as_byte_address().into_block_parts();
-            blocks[usize::from(idx)].write_instruction(i.clone(), offset);
+            blocks[usize::from(idx)].write_word(offset, i.encode());
             addr = addr.next();
         }
 
@@ -626,14 +740,39 @@ impl Machine {
         (self.block(block_index), block_offset)
     }
 
-    pub fn block_mut_from_addr(&mut self, addr: ByteAddress) -> (&mut Block, BlockOffset) {
+    pub fn block_from_addr_mut(&mut self, addr: ByteAddress) -> (&mut Block, BlockOffset) {
         let (block_index, block_offset) = addr.into_block_parts();
         (self.block_mut(block_index), block_offset)
+    }
+
+    pub fn read_byte(&self, addr: ByteAddress) -> u8 {
+        let (block, offset) = self.block_from_addr(addr);
+        block.read_byte(offset)
+    }
+
+    pub fn read_half_word(&self, addr: ByteAddress) -> u16 {
+        let (block, offset) = self.block_from_addr(addr);
+        block.read_half_word(offset)
     }
 
     pub fn read_word(&self, addr: ByteAddress) -> u32 {
         let (block, offset) = self.block_from_addr(addr);
         block.read_word(offset)
+    }
+
+    pub fn write_byte(&mut self, addr: ByteAddress, data: u8) {
+        let (block, offset) = self.block_from_addr_mut(addr);
+        block.write_byte(offset, data);
+    }
+
+    pub fn write_half_word(&mut self, addr: ByteAddress, data: u16) {
+        let (block, offset) = self.block_from_addr_mut(addr);
+        block.write_half_word(offset, data);
+    }
+
+    pub fn write_word(&mut self, addr: ByteAddress, data: u32) {
+        let (block, offset) = self.block_from_addr_mut(addr);
+        block.write_word(offset, data);
     }
 
     pub fn instruction_at(&self, addr: ByteAddress) -> Result<Instruction, InstructionError> {
@@ -658,7 +797,7 @@ impl Machine {
 
     const SHIFT_MASK: u32 = 0x1F;
 
-    pub fn exec_r_type(&mut self, op: Op, rr: usize, ra: usize, rb: usize) -> InstructionOutcome {
+    fn exec_r_type(&mut self, op: Op, rr: usize, ra: usize, rb: usize) -> InstructionOutcome {
         let r_a = self.read_reg(ra);
         let r_b = self.read_reg(rb);
 
@@ -691,11 +830,10 @@ impl Machine {
         InstructionOutcome { jumped: false }
     }
 
-    pub fn exec_i_type(&mut self, op: Op, rr: usize, ra: usize, imm: u16) -> InstructionOutcome {
+    fn exec_i_type(&mut self, op: Op, rr: usize, ra: usize, imm: u16) -> InstructionOutcome {
         let r_r = self.read_reg(rr);
         let r_a = self.read_reg(ra);
         let mut jumped = false;
-        let word_offset = WordOffset::from_immediate(imm);
 
         let result = match op {
             Op::Addi  => Some(r_a.wrapping_add(imm as u32)),
@@ -714,13 +852,60 @@ impl Machine {
                 0
             }),
             Op::Sltui => Some(if r_a < imm as u32 { 1 } else { 0 }),
+            Op::Ldw => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                Some(self.read_word(addr))
+            },
+            Op::Ldhw => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                // Some maneuvering for preserving signedness.
+                Some(self.read_half_word(addr) as i16 as i32 as u32)
+            },
+            Op::Ldhwu => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                Some(self.read_half_word(addr) as u32)
+            },
+            Op::Ldb => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                // Some maneuvering for preserving signedness.
+                Some(self.read_byte(addr) as i8 as i32 as u32)
+            },
+            Op::Ldbu => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                Some(self.read_byte(addr) as u32)
+            },
+            Op::Stw => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                self.write_word(addr, r_r);
+                None
+            },
+            Op::Sthw => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                self.write_half_word(addr, r_r as u16);
+                None
+            },
+            Op::Stb => {
+                let byte_offset = ByteOffset::from_immediate(imm);
+                let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
+                self.write_byte(addr, r_r as u8);
+                None
+            },
             Op::Jmp => {
+                let word_offset = WordOffset::from_immediate(imm);
                 let (ret, _) = self.program_counter.next_word();
                 self.add_program_counter(word_offset);
                 jumped = true;
                 Some(ret.as_u32())
             }
             Op::Jmpr => {
+                let word_offset = WordOffset::from_immediate(imm);
                 let (ret, _) = self.program_counter.next_word();
                 let (addr, _) = ByteAddress::from_u32(r_a).overflowing_add_words(word_offset);
                 self.set_program_counter(addr);
@@ -728,6 +913,7 @@ impl Machine {
                 Some(ret.as_u32())
             }
             Op::Beq => {
+                let word_offset = WordOffset::from_immediate(imm);
                 if r_r == r_a {
                     self.add_program_counter(word_offset);
                     jumped = true;
@@ -735,6 +921,7 @@ impl Machine {
                 None
             }
             Op::Bne => {
+                let word_offset = WordOffset::from_immediate(imm);
                 if r_r != r_a {
                     self.add_program_counter(word_offset);
                     jumped = true;
