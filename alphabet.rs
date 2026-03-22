@@ -257,16 +257,17 @@ impl Instruction {
     /// +------------------------------------+
     /// |   6  |  5  |  5  |  5  |    11     | == 32
     /// +------------------------------------+
+    ///  opcode  rr    ra    rb     packing (unused)
+    ///
     /// ```
-    ///  opcode  rr    ra    rb     packing (not used)
     ///
     /// I-mode:
     /// ```
     /// +------------------------------------+
     /// |   6  |  5  |  5  |       16        | == 32
     /// +------------------------------------+
-    /// ```
     ///  opcode  rr    ra       immediate
+    /// ```
     pub fn decode(word: u32) -> Result<Instruction, InstructionError> {
         let opcode = ((word >> Instruction::OPCODE_OFFSET) & OPCODE_MASK) as u8;
         let op = Op::try_from(opcode).map_err(|_| InstructionError::InvalidOperation { opcode })?;
@@ -481,12 +482,6 @@ pub struct BlockIndex(u16);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockOffset(u16);
 
-impl From<BlockIndex> for usize {
-    fn from(val: BlockIndex) -> Self {
-        val.0 as usize
-    }
-}
-
 impl ByteAddress {
     pub const ZERO: Self = Self(0);
 
@@ -546,15 +541,15 @@ impl WordOffset {
     }
 }
 
-impl From<BlockOffset> for usize {
-    fn from(val: BlockOffset) -> Self {
-        val.0 as usize
+impl BlockIndex {
+    pub const fn as_usize(self) -> usize {
+        self.0 as usize
     }
 }
 
-impl From<ByteAddress> for u32 {
-    fn from(val: ByteAddress) -> Self {
-        val.as_u32()
+impl BlockOffset {
+    pub const fn as_usize(self) -> usize {
+        self.0 as usize
     }
 }
 
@@ -566,7 +561,7 @@ impl Block {
     pub fn read_byte(&self, offset: BlockOffset) -> u8 {
         match self {
             Block::Empty => 0,
-            Block::Memory(mem) => mem[usize::from(offset)],
+            Block::Memory(mem) => mem[offset.as_usize()],
         }
     }
 
@@ -576,7 +571,7 @@ impl Block {
                 return 0;
             }
             Block::Memory(mem) => {
-                let u = usize::from(offset);
+                let u = offset.as_usize();
                 [mem[u], mem[u + 1]]
             }
         };
@@ -589,7 +584,7 @@ impl Block {
                 return 0;
             }
             Block::Memory(mem) => {
-                let u = usize::from(offset);
+                let u = offset.as_usize();
                 [mem[u], mem[u + 1], mem[u + 2], mem[u + 3]]
             }
         };
@@ -602,7 +597,7 @@ impl Block {
                 *self = Block::new_memory();
                 self.write_byte(offset, byte);
             }
-            Block::Memory(mem) => mem[usize::from(offset)] = byte,
+            Block::Memory(mem) => mem[offset.as_usize()] = byte,
         }
     }
 
@@ -666,7 +661,7 @@ impl Machine {
         let mut addr = ByteAddress::ZERO;
         for i in instructions {
             let (idx, offset) = addr.into_block_parts();
-            blocks[usize::from(idx)].write_word(offset, i.encode());
+            blocks[idx.as_usize()].write_word(offset, i.encode());
             addr = addr.next_word().0;
         }
 
@@ -714,11 +709,11 @@ impl Machine {
     }
 
     pub fn block(&self, block_index: BlockIndex) -> &Block {
-        &self.blocks[usize::from(block_index)]
+        &self.blocks[block_index.as_usize()]
     }
 
     pub fn block_mut(&mut self, block_index: BlockIndex) -> &mut Block {
-        &mut self.blocks[usize::from(block_index)]
+        &mut self.blocks[block_index.as_usize()]
     }
 
     pub fn block_from_addr(&self, addr: ByteAddress) -> (&Block, BlockOffset) {
