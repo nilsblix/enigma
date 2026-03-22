@@ -1136,4 +1136,26 @@ mod tests {
         assert!(!outcome.1.jumped);
         assert_eq!(m.read_reg(2), 11);
     }
+
+    #[test]
+    fn simple_store_and_load() {
+        let is = [
+            Instruction::stw(1, 2, 0x1FFF),
+            Instruction::addi(1, 0, 0),
+            Instruction::ldw(3, 2, 0x1FFF),
+            Instruction::HALT,
+        ];
+
+        let mut m = Machine::from_instructions(is.as_slice());
+        m.set_reg(1, 4338);
+        m.set_reg(2, 0x20000);
+
+        // We put the value 4338 into the addr 0x21FFF.
+        m.execute_while_not_halt().unwrap();
+        assert_eq!(m.read_reg(1), 0);
+        assert_eq!(m.read_reg(3), 4338);
+
+        let (block, offset) = m.block_from_addr(ByteAddress(0x21FFF));
+        assert_eq!(block.read_word(offset), 4338);
+    }
 }
