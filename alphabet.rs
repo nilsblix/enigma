@@ -8,73 +8,73 @@ pub enum Op {
     // ========== R-types ==========
     //
     /// Signed and unsigned addition.
-    Add  = 0x01,
+    Add = 0x01,
     /// Signed and unsigned subtraction.
-    Sub  = 0x02,
+    Sub = 0x02,
     /// Logical bitshift left.
-    Shl  = 0x03,
+    Shl = 0x03,
     /// Logical bitshift right.
-    Shr  = 0x04,
+    Shr = 0x04,
     /// Logical bitwise or.
-    Or   = 0x05,
+    Or = 0x05,
     /// Logical bitwise and.
-    And  = 0x06,
+    And = 0x06,
     /// Logical bitwise exclusive-or.
-    Xor  = 0x07,
+    Xor = 0x07,
     /// Less-than signed comparison.
-    Slt  = 0x08,
+    Slt = 0x08,
     /// Less-than unsigned comparison
     Sltu = 0x09,
     // ========== I-types ==========
     //
     /// Immediate unsigned value addition.
-    Addi  = 0x21,
+    Addi = 0x21,
     /// Immediate unsigned value subtraction.
-    Subi  = 0x22,
+    Subi = 0x22,
     /// Immediate logical bitshift left.
-    Shli  = 0x23,
+    Shli = 0x23,
     /// Immediate logical bitshift right.
-    Shri  = 0x24,
+    Shri = 0x24,
     /// Logical bitwise or for lower 16 bits.
-    Ori   = 0x25,
+    Ori = 0x25,
     /// Logical bitwise or for upper 16 bits.
-    Orui  = 0x26,
+    Orui = 0x26,
     /// Logical bitwise and for lower 16 bits.
-    Andi  = 0x27,
+    Andi = 0x27,
     /// Logical bitwise and for upper 16 bits.
     Andui = 0x28,
     /// Logical bitwise exclusive-or for lower 16 bits.
-    Xori  = 0x29,
+    Xori = 0x29,
     /// Logical bitwise exclusive-or for upper 16 bits.
     Xorui = 0x2a,
     /// Less-than immediate signed comparison.
-    Slti  = 0x2b,
+    Slti = 0x2b,
     /// Less-than immediate unsigned comparison.
     Sltui = 0x2c,
     /// Load word from memory.
-    Ldw   = 0x31,
+    Ldw = 0x31,
     /// Load half-word from memory.
-    Ldhw  = 0x32,
+    Ldhw = 0x32,
     /// Load unsigned half-word from memory.
     Ldhwu = 0x33,
     /// Load byte from memory.
-    Ldb   = 0x34,
+    Ldb = 0x34,
     /// Load unsigned byte from memory.
-    Ldbu  = 0x35,
+    Ldbu = 0x35,
     /// Store word to memory.
-    Stw   = 0x36,
+    Stw = 0x36,
     /// Store half-word to memory.
-    Sthw  = 0x37,
+    Sthw = 0x37,
     /// Store byte to memory.
-    Stb   = 0x38,
+    Stb = 0x38,
     /// Jump and link by offset.
-    Jmp   = 0x39,
+    Jmp = 0x39,
     /// Jump and link relative to register.
-    Jmpr  = 0x3A,
+    Jmpr = 0x3A,
     /// Branch by offset if equal.
-    Beq   = 0x3B,
+    Beq = 0x3B,
     /// Branch by offset if not equal.
-    Bne   = 0x3C,
+    Bne = 0x3C,
 }
 
 #[derive(PartialEq)]
@@ -89,40 +89,40 @@ impl Op {
         match self {
             Op::Noop => "noop",
             // Rs
-            Op::Add  => "add",
-            Op::Sub  => "sub",
-            Op::Shl  => "shl",
-            Op::Shr  => "shr",
-            Op::Or   => "or",
-            Op::And  => "and",
-            Op::Xor  => "xor",
-            Op::Slt  => "slt",
+            Op::Add => "add",
+            Op::Sub => "sub",
+            Op::Shl => "shl",
+            Op::Shr => "shr",
+            Op::Or => "or",
+            Op::And => "and",
+            Op::Xor => "xor",
+            Op::Slt => "slt",
             Op::Sltu => "sltu",
             // Is
-            Op::Addi  => "add_i",
-            Op::Subi  => "sub_i",
-            Op::Shli  => "shl_i",
-            Op::Shri  => "shr_i",
-            Op::Ori   => "or_i",
-            Op::Orui  => "oru_i",
-            Op::Andi  => "and_i",
+            Op::Addi => "add_i",
+            Op::Subi => "sub_i",
+            Op::Shli => "shl_i",
+            Op::Shri => "shr_i",
+            Op::Ori => "or_i",
+            Op::Orui => "oru_i",
+            Op::Andi => "and_i",
             Op::Andui => "andu_i",
-            Op::Xori  => "xor_i",
+            Op::Xori => "xor_i",
             Op::Xorui => "xoru_i",
-            Op::Slti  => "slt_i",
+            Op::Slti => "slt_i",
             Op::Sltui => "sltu_i",
-            Op::Ldw   => "ldw_i",
-            Op::Ldhw  => "ldhw_i",
+            Op::Ldw => "ldw_i",
+            Op::Ldhw => "ldhw_i",
             Op::Ldhwu => "ldhwu_i",
-            Op::Ldb   => "ldb_i",
-            Op::Ldbu  => "ldbu_i",
-            Op::Stw   => "stw_i",
-            Op::Sthw  => "sthw_i",
-            Op::Stb   => "stb_i",
-            Op::Jmp   => "jmp_i",
-            Op::Jmpr  => "jmpr_i",
-            Op::Beq   => "beq_i",
-            Op::Bne   => "bne_i",
+            Op::Ldb => "ldb_i",
+            Op::Ldbu => "ldbu_i",
+            Op::Stw => "stw_i",
+            Op::Sthw => "sthw_i",
+            Op::Stb => "stb_i",
+            Op::Jmp => "jmp_i",
+            Op::Jmpr => "jmpr_i",
+            Op::Beq => "beq_i",
+            Op::Bne => "bne_i",
         }
     }
 
@@ -293,13 +293,17 @@ impl Instruction {
     }
 
     pub fn r_type(op: Op, rr: usize, ra: usize, rb: usize) -> Instruction {
-        let payload = Payload::R{ rr, ra, rb };
-        Instruction{ op, payload }
+        let payload = Payload::R { rr, ra, rb };
+        Instruction { op, payload }
     }
 
     pub fn i_type(op: Op, rr: usize, ra: usize, imm: u16) -> Instruction {
-        let payload = Payload::I{ rr, ra, immediate: imm };
-        Instruction{ op, payload }
+        let payload = Payload::I {
+            rr,
+            ra,
+            immediate: imm,
+        };
+        Instruction { op, payload }
     }
 
     pub const fn noop() -> Instruction {
@@ -698,6 +702,17 @@ impl Machine {
         m
     }
 
+    pub fn restart(&mut self) {
+        self.program_counter = ByteAddress(0);
+        self.regs.fill(0);
+        self.regs[SP_INDEX] = STACK_BEGINNING;
+    }
+
+    pub fn reset(&mut self) {
+        self.restart();
+        self.blocks.fill_with(|| Block::Empty);
+    }
+
     pub fn read_reg(&self, index: usize) -> u32 {
         self.regs[index % REGISTER_COUNT]
     }
@@ -806,7 +821,7 @@ impl Machine {
             Op::Sub => r_a.wrapping_sub(r_b),
             Op::Shl => r_a << (r_b & Self::SHIFT_MASK),
             Op::Shr => r_a >> (r_b & Self::SHIFT_MASK),
-            Op::Or  => r_a | r_b,
+            Op::Or => r_a | r_b,
             Op::And => r_a & r_b,
             Op::Xor => r_a ^ r_b,
             Op::Slt => {
@@ -815,14 +830,14 @@ impl Machine {
                 } else {
                     0
                 }
-            },
+            }
             Op::Sltu => {
                 if r_a < r_b {
                     1
                 } else {
                     0
                 }
-            },
+            }
             _ => panic!("invalid R-type opcode: {}", op.name()),
         };
 
@@ -836,8 +851,8 @@ impl Machine {
         let mut jumped = false;
 
         let result = match op {
-            Op::Addi  => Some(r_a.wrapping_add(imm as u32)),
-            Op::Subi  => Some(r_a.wrapping_sub(imm as u32)),
+            Op::Addi => Some(r_a.wrapping_add(imm as u32)),
+            Op::Subi => Some(r_a.wrapping_sub(imm as u32)),
             Op::Shli => Some(r_a << (imm & Self::SHIFT_MASK as u16)),
             Op::Shri => Some(r_a >> (imm & Self::SHIFT_MASK as u16)),
             Op::Andi => Some(r_a & (imm as u32 | 0xFFFF0000)),
@@ -856,47 +871,47 @@ impl Machine {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 Some(self.read_word(addr))
-            },
+            }
             Op::Ldhw => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 // Some maneuvering for preserving signedness.
                 Some(self.read_half_word(addr) as i16 as i32 as u32)
-            },
+            }
             Op::Ldhwu => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 Some(self.read_half_word(addr) as u32)
-            },
+            }
             Op::Ldb => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 // Some maneuvering for preserving signedness.
                 Some(self.read_byte(addr) as i8 as i32 as u32)
-            },
+            }
             Op::Ldbu => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 Some(self.read_byte(addr) as u32)
-            },
+            }
             Op::Stw => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 self.write_word(addr, r_r);
                 None
-            },
+            }
             Op::Sthw => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 self.write_half_word(addr, r_r as u16);
                 None
-            },
+            }
             Op::Stb => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 self.write_byte(addr, r_r as u8);
                 None
-            },
+            }
             Op::Jmp => {
                 let word_offset = WordOffset::from_immediate(imm);
                 let (ret, _) = self.program_counter.next_word();
@@ -1140,22 +1155,64 @@ mod tests {
     #[test]
     fn simple_store_and_load() {
         let is = [
-            Instruction::stw(1, 2, 0x1FFF),
+            Instruction::stw(1, 2, 0x100),
+            Instruction::sthw(3, 2, 0x104),
+            Instruction::stb(4, 2, 0x106),
             Instruction::addi(1, 0, 0),
-            Instruction::ldw(3, 2, 0x1FFF),
+            Instruction::addi(3, 0, 0),
+            Instruction::addi(4, 0, 0),
+            Instruction::ldw(5, 2, 0x100),
+            Instruction::ldhwu(6, 2, 0x104),
+            Instruction::ldbu(7, 2, 0x106),
             Instruction::HALT,
         ];
 
         let mut m = Machine::from_instructions(is.as_slice());
-        m.set_reg(1, 4338);
+        m.set_reg(1, 0x1234_5678);
         m.set_reg(2, 0x20000);
+        m.set_reg(3, 0xBEEF);
+        m.set_reg(4, 0xAB);
 
-        // We put the value 4338 into the addr 0x21FFF.
         m.execute_while_not_halt().unwrap();
-        assert_eq!(m.read_reg(1), 0);
-        assert_eq!(m.read_reg(3), 4338);
 
-        let (block, offset) = m.block_from_addr(ByteAddress(0x21FFF));
-        assert_eq!(block.read_word(offset), 4338);
+        assert_eq!(m.read_reg(1), 0);
+        assert_eq!(m.read_reg(3), 0);
+        assert_eq!(m.read_reg(4), 0);
+        assert_eq!(m.read_reg(5), 0x1234_5678);
+        assert_eq!(m.read_reg(6), 0x0000_BEEF);
+        assert_eq!(m.read_reg(7), 0x0000_00AB);
+
+        let (block, word_offset) = m.block_from_addr(ByteAddress(0x20_100));
+        assert_eq!(block.read_word(word_offset), 0x1234_5678);
+
+        let (block, half_word_offset) = m.block_from_addr(ByteAddress(0x20_104));
+        assert_eq!(block.read_half_word(half_word_offset), 0xBEEF);
+
+        let (block, byte_offset) = m.block_from_addr(ByteAddress(0x20_106));
+        assert_eq!(block.read_byte(byte_offset), 0xAB);
+    }
+
+    #[test]
+    fn signed_and_unsigned_loads_extend_correctly() {
+        let is = [
+            Instruction::ldhw(1, 10, 0x10),
+            Instruction::ldhwu(2, 10, 0x10),
+            Instruction::ldb(3, 10, 0x20),
+            Instruction::ldbu(4, 10, 0x20),
+            Instruction::HALT,
+        ];
+
+        let mut m = Machine::from_instructions(is.as_slice());
+        m.set_reg(10, 0x20_000);
+
+        m.write_half_word(ByteAddress(0x20_010), 0x8001);
+        m.write_byte(ByteAddress(0x20_020), 0x80);
+
+        m.execute_while_not_halt().unwrap();
+
+        assert_eq!(m.read_reg(1), 0xFFFF_8001);
+        assert_eq!(m.read_reg(2), 0x0000_8001);
+        assert_eq!(m.read_reg(3), 0xFFFF_FF80);
+        assert_eq!(m.read_reg(4), 0x0000_0080);
     }
 }
