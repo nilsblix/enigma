@@ -310,6 +310,8 @@ impl Instruction {
         Instruction::NOOP
     }
 
+    // ========== R-types ==========
+
     pub fn add(rr: usize, ra: usize, rb: usize) -> Instruction {
         Instruction::r_type(Op::Add, rr, ra, rb)
     }
@@ -346,7 +348,7 @@ impl Instruction {
         Instruction::r_type(Op::Sltu, rr, ra, rb)
     }
 
-    // --- I-types ---
+    // ========== I-types ==========
 
     pub fn addi(rr: usize, ra: usize, imm: u16) -> Instruction {
         Instruction::i_type(Op::Addi, rr, ra, imm)
@@ -464,14 +466,8 @@ pub enum Block {
 pub struct ByteAddress(u32);
 
 /// A signed displacement measured in 32-bit bytes.
-///
-/// Commonly, ByteOffset = WordOffset * 4
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ByteOffset(i32);
-
-/// An instruction index measured in 32-bit words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct WordAddress(u32);
 
 /// A signed displacement measured in 32-bit words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -508,25 +504,29 @@ impl ByteAddress {
         self.0
     }
 
+    fn wrap_on_overflow(x: i64) -> (ByteAddress, bool) {
+        let overflow = !(0..=((u32::MAX) as i64)).contains(&x);
+        let wrapped = x.rem_euclid((u32::MAX as i64) + 1) as u32;
+        (ByteAddress(wrapped), overflow)
+    }
+
     /// Add some byte offset to a byte address, returning a new byte address
     /// and a [`bool`] indicating overflow.
     pub fn overflowing_add_bytes(self, byte_offset: ByteOffset) -> (ByteAddress, bool) {
         let total = (self.0 as i64) + byte_offset.0 as i64;
-        let overflow = !(0..=((u32::MAX) as i64)).contains(&total);
-        let wrapped = total.rem_euclid((u32::MAX as i64) + 1) as u32;
-        (ByteAddress(wrapped), overflow)
+        ByteAddress::wrap_on_overflow(total)
     }
 
     /// Add some word offset to a byte address, returning a new byte address
     /// and a [`bool`] indicating overflow.
     pub fn overflowing_add_words(self, word_offset: WordOffset) -> (ByteAddress, bool) {
-        let (byte_offset, fst) = word_offset.to_byte_offset();
-        let (addr, snd) = self.overflowing_add_bytes(byte_offset);
-        (addr, fst || snd)
+        let byte_offset = (word_offset.0 as i64) * (WORD_SIZE_BYTES as i64);
+        let total = (self.0 as i64) + byte_offset;
+        ByteAddress::wrap_on_overflow(total)
     }
 
     pub fn next_word(self) -> (ByteAddress, bool) {
-        self.overflowing_add_words(WordOffset::words(1))
+        self.overflowing_add_bytes(ByteOffset::byte_offset(WORD_SIZE_BYTES as i32))
     }
 }
 
@@ -540,38 +540,9 @@ impl ByteOffset {
     }
 }
 
-impl WordAddress {
-    pub const fn words(index: u32) -> Self {
-        Self(index)
-    }
-
-    pub fn as_byte_address(self) -> ByteAddress {
-        let (addr, overflow) = self.0.overflowing_mul(WORD_SIZE_BYTES);
-        if overflow {
-            panic!("word address overflowed");
-        }
-        ByteAddress(addr)
-    }
-
-    pub fn next(self) -> Self {
-        Self(self.0.wrapping_add(1))
-    }
-}
-
 impl WordOffset {
-    pub const fn words(offset: i32) -> Self {
-        Self(offset)
-    }
-
     pub const fn from_immediate(immediate: u16) -> Self {
         Self(immediate as i16 as i32)
-    }
-
-    /// Returns false on overflow.
-    pub fn to_byte_offset(self) -> (ByteOffset, bool) {
-        let byte_offset = (self.0 as i64) * (WORD_SIZE_BYTES as i64);
-        let overflow = !(i32::MIN as i64..=i32::MAX as i64).contains(&byte_offset);
-        (ByteOffset(byte_offset as i32), overflow)
     }
 }
 
@@ -692,11 +663,11 @@ impl Machine {
         let mut m = Machine::new();
         let blocks = m.blocks.as_mut_slice();
 
-        let mut addr = WordAddress::words(0);
+        let mut addr = ByteAddress::ZERO;
         for i in instructions {
-            let (idx, offset) = addr.as_byte_address().into_block_parts();
+            let (idx, offset) = addr.into_block_parts();
             blocks[usize::from(idx)].write_word(offset, i.encode());
-            addr = addr.next();
+            addr = addr.next_word().0;
         }
 
         m
@@ -1118,10 +1089,7 @@ mod tests {
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
-        assert_eq!(
-            m.read_reg(1),
-            WordAddress::words(1).as_byte_address().as_u32()
-        );
+        assert_eq!(m.read_reg(1), WORD_SIZE_BYTES);
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
@@ -1138,14 +1106,11 @@ mod tests {
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
-        m.set_reg(3, WordAddress::words(1).as_byte_address().as_u32());
+        m.set_reg(3, WORD_SIZE_BYTES);
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
-        assert_eq!(
-            m.read_reg(1),
-            WordAddress::words(1).as_byte_address().as_u32()
-        );
+        assert_eq!(m.read_reg(1), WORD_SIZE_BYTES);
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
