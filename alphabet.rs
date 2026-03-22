@@ -210,6 +210,11 @@ impl Instruction {
         },
     };
 
+    pub const NOOP: Instruction = Instruction {
+        op: Op::Noop,
+        payload: Payload::Noop,
+    };
+
     pub const OPCODE_OFFSET: usize = 26;
 
     /// Each instruction is stored as either an R-type (register mode) or
@@ -255,6 +260,122 @@ impl Instruction {
 
     pub const fn encode(&self) -> u32 {
         ((self.op.opcode() as u32) << Instruction::OPCODE_OFFSET) | self.payload.encode()
+    }
+
+    pub fn r_type(op: Op, rr: usize, ra: usize, rb: usize) -> Instruction {
+        let payload = Payload::R{ rr, ra, rb };
+        Instruction{ op, payload }
+    }
+
+    pub fn i_type(op: Op, rr: usize, ra: usize, imm: u16) -> Instruction {
+        let payload = Payload::I{ rr, ra, immediate: imm };
+        Instruction{ op, payload }
+    }
+
+    pub const fn noop() -> Instruction {
+        Instruction::NOOP
+    }
+
+    pub fn add(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Add, rr, ra, rb)
+    }
+
+    pub fn sub(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Sub, rr, ra, rb)
+    }
+
+    pub fn shl(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Shl, rr, ra, rb)
+    }
+
+    pub fn shr(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Shr, rr, ra, rb)
+    }
+
+    pub fn or(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Or, rr, ra, rb)
+    }
+
+    pub fn and(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::And, rr, ra, rb)
+    }
+
+    pub fn xor(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Xor, rr, ra, rb)
+    }
+
+    pub fn slt(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Slt, rr, ra, rb)
+    }
+
+    pub fn sltu(rr: usize, ra: usize, rb: usize) -> Instruction {
+        Instruction::r_type(Op::Sltu, rr, ra, rb)
+    }
+
+    // --- I-types ---
+
+    pub fn addi(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Addi, rr, ra, imm)
+    }
+
+    pub fn subi(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Subi, rr, ra, imm)
+    }
+
+    pub fn shli(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Shli, rr, ra, imm)
+    }
+
+    pub fn shri(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Shri, rr, ra, imm)
+    }
+
+    pub fn ori(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Ori, rr, ra, imm)
+    }
+
+    pub fn orui(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Orui, rr, ra, imm)
+    }
+
+    pub fn andi(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Andi, rr, ra, imm)
+    }
+
+    pub fn andui(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Andui, rr, ra, imm)
+    }
+
+    pub fn xori(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Xori, rr, ra, imm)
+    }
+
+    pub fn xorui(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Xorui, rr, ra, imm)
+    }
+
+    pub fn slti(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Slti, rr, ra, imm)
+    }
+
+    pub fn sltui(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Sltui, rr, ra, imm)
+    }
+
+    pub fn jmp(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Jmp, rr, ra, imm)
+    }
+
+    pub fn jmpr(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Jmpr, rr, ra, imm)
+    }
+
+    pub fn beq(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Beq, rr, ra, imm)
+    }
+
+    pub fn bne(rr: usize, ra: usize, imm: u16) -> Instruction {
+        Instruction::i_type(Op::Bne, rr, ra, imm)
     }
 }
 
@@ -371,6 +492,10 @@ impl From<ByteAddress> for u32 {
 }
 
 impl Block {
+    pub fn new_memory() -> Block {
+        Block::Memory(Box::new([0u8; BLOCK_SIZE]))
+    }
+
     pub fn read_word(&self, offset: BlockOffset) -> u32 {
         let bytes = match self {
             Block::Empty => {
@@ -384,22 +509,26 @@ impl Block {
         u32::from_be_bytes(bytes)
     }
 
-    pub fn set_byte(&mut self, byte: u8, offset: BlockOffset) {
+    pub fn write_byte(&mut self, byte: u8, offset: BlockOffset) {
         match self {
             Block::Empty => {
-                *self = Block::Memory(Box::new([0u8; BLOCK_SIZE]));
-                self.set_byte(byte, offset);
+                *self = Block::new_memory();
+                self.write_byte(byte, offset);
             }
             Block::Memory(mem) => mem[usize::from(offset)] = byte,
         }
     }
 
-    pub fn set_instruction(&mut self, inst: Instruction, offset: BlockOffset) {
-        let bytes = inst.encode().to_be_bytes();
-        self.set_byte(bytes[0], offset);
-        self.set_byte(bytes[1], BlockOffset(offset.0 + 1));
-        self.set_byte(bytes[2], BlockOffset(offset.0 + 2));
-        self.set_byte(bytes[3], BlockOffset(offset.0 + 3));
+    pub fn write_word(&mut self, word: u32, offset: BlockOffset) {
+        let bytes = word.to_be_bytes();
+        self.write_byte(bytes[0], offset);
+        self.write_byte(bytes[1], BlockOffset(offset.0 + 1));
+        self.write_byte(bytes[2], BlockOffset(offset.0 + 2));
+        self.write_byte(bytes[3], BlockOffset(offset.0 + 3));
+    }
+
+    pub fn write_instruction(&mut self, inst: Instruction, offset: BlockOffset) {
+        self.write_word(inst.encode(), offset);
     }
 }
 
@@ -448,18 +577,18 @@ impl Machine {
         let mut addr = WordAddress::words(0);
         for i in instructions {
             let (idx, offset) = addr.as_byte_address().into_block_parts();
-            blocks[usize::from(idx)].set_instruction(i.clone(), offset);
+            blocks[usize::from(idx)].write_instruction(i.clone(), offset);
             addr = addr.next();
         }
 
         m
     }
 
-    pub fn register(&self, index: usize) -> u32 {
+    pub fn read_reg(&self, index: usize) -> u32 {
         self.regs[index % REGISTER_COUNT]
     }
 
-    pub fn set_register(&mut self, index: usize, word: u32) {
+    pub fn set_reg(&mut self, index: usize, word: u32) {
         let index = index % REGISTER_COUNT;
         if index == 0 {
             return;
@@ -488,9 +617,18 @@ impl Machine {
         &self.blocks[usize::from(block_index)]
     }
 
+    pub fn block_mut(&mut self, block_index: BlockIndex) -> &mut Block {
+        &mut self.blocks[usize::from(block_index)]
+    }
+
     pub fn block_from_addr(&self, addr: ByteAddress) -> (&Block, BlockOffset) {
         let (block_index, block_offset) = addr.into_block_parts();
         (self.block(block_index), block_offset)
+    }
+
+    pub fn block_mut_from_addr(&mut self, addr: ByteAddress) -> (&mut Block, BlockOffset) {
+        let (block_index, block_offset) = addr.into_block_parts();
+        (self.block_mut(block_index), block_offset)
     }
 
     pub fn read_word(&self, addr: ByteAddress) -> u32 {
@@ -521,8 +659,8 @@ impl Machine {
     const SHIFT_MASK: u32 = 0x1F;
 
     pub fn exec_r_type(&mut self, op: Op, rr: usize, ra: usize, rb: usize) -> InstructionOutcome {
-        let r_a = self.register(ra);
-        let r_b = self.register(rb);
+        let r_a = self.read_reg(ra);
+        let r_b = self.read_reg(rb);
 
         let result = match op {
             Op::Add => r_a.wrapping_add(r_b),
@@ -549,13 +687,13 @@ impl Machine {
             _ => panic!("invalid R-type opcode: {}", op.name()),
         };
 
-        self.set_register(rr, result);
+        self.set_reg(rr, result);
         InstructionOutcome { jumped: false }
     }
 
     pub fn exec_i_type(&mut self, op: Op, rr: usize, ra: usize, imm: u16) -> InstructionOutcome {
-        let r_r = self.register(rr);
-        let r_a = self.register(ra);
+        let r_r = self.read_reg(rr);
+        let r_a = self.read_reg(ra);
         let mut jumped = false;
         let word_offset = WordOffset::from_immediate(imm);
 
@@ -607,7 +745,7 @@ impl Machine {
         };
 
         if let Some(result) = result {
-            self.set_register(rr, result);
+            self.set_reg(rr, result);
         }
 
         InstructionOutcome { jumped }
@@ -713,8 +851,8 @@ mod tests {
     #[test]
     fn painfully_written_execute_and_advance() {
         let mut m = Machine::new();
-        m.set_register(2, 34);
-        m.set_register(3, 35);
+        m.set_reg(2, 34);
+        m.set_reg(3, 35);
 
         // add r0, r1, r2
         //          |  op | rr | ra | rb |  packing  |
@@ -730,7 +868,7 @@ mod tests {
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
-        assert_eq!(m.register(1), 69);
+        assert_eq!(m.read_reg(1), 69);
     }
 
     #[test]
@@ -742,77 +880,36 @@ mod tests {
         //
         // i.e the noop should not be executed.
         let instructions = [
-            Instruction {
-                op: Op::Add,
-                payload: Payload::R {
-                    rr: 1,
-                    ra: 2,
-                    rb: 3,
-                },
-            },
-            Instruction {
-                op: Op::Beq,
-                payload: Payload::I {
-                    rr: 1,
-                    ra: 4,
-                    immediate: 2,
-                },
-            },
-            Instruction {
-                op: Op::Noop,
-                payload: Payload::Noop,
-            },
-            Instruction {
-                op: Op::Shl,
-                payload: Payload::R {
-                    rr: 6,
-                    ra: 1,
-                    rb: 5,
-                },
-            },
+            Instruction::add(1, 2, 3),
+            Instruction::beq(1, 4, 2),
+            Instruction::noop(),
+            Instruction::shl(6, 1, 5),
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
-        m.set_register(2, 33);
-        m.set_register(3, 34);
-        m.set_register(4, 67);
-        m.set_register(5, 2);
+        m.set_reg(2, 33);
+        m.set_reg(3, 34);
+        m.set_reg(4, 67);
+        m.set_reg(5, 2);
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
-        assert_eq!(m.register(1), 67);
+        assert_eq!(m.read_reg(1), 67);
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
-        assert_eq!(m.register(6), 268);
+        assert_eq!(m.read_reg(6), 268);
     }
 
     #[test]
     fn jump_and_link_uses_word_offsets() {
         let instructions = [
-            Instruction {
-                op: Op::Jmp,
-                payload: Payload::I {
-                    rr: 1,
-                    ra: 0,
-                    immediate: 2,
-                },
-            },
-            Instruction {
-                op: Op::Noop,
-                payload: Payload::Noop,
-            },
-            Instruction {
-                op: Op::Addi,
-                payload: Payload::I {
-                    rr: 2,
-                    ra: 0,
-                    immediate: 9,
-                },
-            },
+            Instruction::jmp(1, 0, 2),
+            Instruction::noop(),
+            Instruction::addi(2, 0, 9),
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
@@ -820,56 +917,36 @@ mod tests {
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
         assert_eq!(
-            m.register(1),
+            m.read_reg(1),
             WordAddress::words(1).as_byte_address().as_u32()
         );
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
-        assert_eq!(m.register(2), 9);
+        assert_eq!(m.read_reg(2), 9);
     }
 
     #[test]
     fn register_relative_jump_uses_word_offsets() {
         let instructions = [
-            Instruction {
-                op: Op::Jmpr,
-                payload: Payload::I {
-                    rr: 1,
-                    ra: 3,
-                    immediate: 2,
-                },
-            },
-            Instruction {
-                op: Op::Noop,
-                payload: Payload::Noop,
-            },
-            Instruction {
-                op: Op::Noop,
-                payload: Payload::Noop,
-            },
-            Instruction {
-                op: Op::Addi,
-                payload: Payload::I {
-                    rr: 2,
-                    ra: 0,
-                    immediate: 11,
-                },
-            },
+            Instruction::jmpr(1, 3, 2),
+            Instruction::noop(),
+            Instruction::noop(),
+            Instruction::addi(2, 0, 11),
         ];
 
         let mut m = Machine::from_instructions(instructions.as_slice());
-        m.set_register(3, WordAddress::words(1).as_byte_address().as_u32());
+        m.set_reg(3, WordAddress::words(1).as_byte_address().as_u32());
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(outcome.1.jumped);
         assert_eq!(
-            m.register(1),
+            m.read_reg(1),
             WordAddress::words(1).as_byte_address().as_u32()
         );
 
         let outcome = m.execute_and_advance().unwrap();
         assert!(!outcome.1.jumped);
-        assert_eq!(m.register(2), 11);
+        assert_eq!(m.read_reg(2), 11);
     }
 }
