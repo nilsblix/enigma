@@ -1,10 +1,10 @@
 [package]
-name = "alphabet"
+name = "enigma"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 
 [[bin]]
-name = "alphabet"
-path = "alphabet.rs"
+name = "enigma"
+path = "enigma.rs"

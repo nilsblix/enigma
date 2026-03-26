@@ -5,47 +5,28 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Noop = 0x00,
+
     // ========== R-types ==========
-    //
-    /// Signed and unsigned addition.
     Add = 0x01,
-    /// Signed and unsigned subtraction.
     Sub = 0x02,
-    /// Logical bitshift left.
     Shl = 0x03,
-    /// Logical bitshift right.
     Shr = 0x04,
-    /// Logical bitwise or.
     Or = 0x05,
-    /// Logical bitwise and.
     And = 0x06,
-    /// Logical bitwise exclusive-or.
     Xor = 0x07,
-    /// Less-than signed comparison.
     Slt = 0x08,
-    /// Less-than unsigned comparison
     Sltu = 0x09,
+
     // ========== I-types ==========
-    //
-    /// Immediate unsigned value addition.
     Addi = 0x21,
-    /// Immediate unsigned value subtraction.
     Subi = 0x22,
-    /// Immediate logical bitshift left.
     Shli = 0x23,
-    /// Immediate logical bitshift right.
     Shri = 0x24,
-    /// Logical bitwise or for lower 16 bits.
     Ori = 0x25,
-    /// Logical bitwise or for upper 16 bits.
     Orui = 0x26,
-    /// Logical bitwise and for lower 16 bits.
     Andi = 0x27,
-    /// Logical bitwise and for upper 16 bits.
     Andui = 0x28,
-    /// Logical bitwise exclusive-or for lower 16 bits.
     Xori = 0x29,
-    /// Logical bitwise exclusive-or for upper 16 bits.
     Xorui = 0x2a,
     /// Less-than immediate signed comparison.
     Slti = 0x2b,
@@ -532,20 +513,20 @@ impl ByteOffset {
 }
 
 impl WordOffset {
-    pub const fn from_immediate(immediate: u16) -> WordOffset {
+    pub fn from_immediate(immediate: u16) -> WordOffset {
         WordOffset(immediate as i16 as i32)
-    }
-}
-
-impl From<BlockIndex> for usize {
-    fn from(idx: BlockIndex) -> usize {
-        idx.0 as usize
     }
 }
 
 impl BlockOffset {
     pub fn next(&self) -> BlockOffset {
         BlockOffset(self.0 + 1)
+    }
+}
+
+impl From<BlockIndex> for usize {
+    fn from(idx: BlockIndex) -> usize {
+        idx.0 as usize
     }
 }
 
