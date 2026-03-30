@@ -1,6 +1,3 @@
-// FIX Remove
-#![allow(dead_code)]
-
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -787,14 +784,6 @@ impl Machine {
         match self.blocks[usize::from(block_index)] {
             Block::Empty | Block::Memory(_) => false,
             Block::Io(_) => true,
-        }
-    }
-
-    pub fn io_at_addr_mut(&mut self, addr: ByteAddress) -> Option<&mut Box<dyn IoController>> {
-        let (block_index, _) = addr.into_block_parts();
-        match &mut self.blocks[usize::from(block_index)] {
-            Block::Empty | Block::Memory(_) => None,
-            Block::Io(con) => Some(con),
         }
     }
 
