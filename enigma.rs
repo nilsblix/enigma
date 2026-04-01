@@ -1,66 +1,50 @@
 #![no_std]
-#![allow(dead_code)]
 
 extern crate alloc;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::iter;
 
+#[rustfmt::skip]
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
-    Noop = 0x00,
-
-    // ========== R-types ==========
-    Add = 0x01,
-    Sub = 0x02,
-    Shl = 0x03,
-    Shr = 0x04,
-    Or = 0x05,
-    And = 0x06,
-    Xor = 0x07,
-    Slt = 0x08,
-    Sltu = 0x09,
-
-    // ========== I-types ==========
-    Addi = 0x21,
-    Subi = 0x22,
-    Shli = 0x23,
-    Shri = 0x24,
-    Ori = 0x25,
-    Orui = 0x26,
-    Andi = 0x27,
+    Noop  = 0x00,
+    //    ========== R-types ==========
+    Add   = 0x01,
+    Sub   = 0x02,
+    Shl   = 0x03,
+    Shr   = 0x04,
+    Or    = 0x05,
+    And   = 0x06,
+    Xor   = 0x07,
+    Slt   = 0x08,
+    Sltu  = 0x09,
+    //    ========== I-types ==========
+    Addi  = 0x21,
+    Subi  = 0x22,
+    Shli  = 0x23,
+    Shri  = 0x24,
+    Ori   = 0x25,
+    Orui  = 0x26,
+    Andi  = 0x27,
     Andui = 0x28,
-    Xori = 0x29,
+    Xori  = 0x29,
     Xorui = 0x2a,
-    /// Less-than immediate signed comparison.
-    Slti = 0x2b,
-    /// Less-than immediate unsigned comparison.
+    Slti  = 0x2b,
     Sltui = 0x2c,
-    /// Load word from memory.
-    Ldw = 0x31,
-    /// Load half-word from memory.
-    Ldhw = 0x32,
-    /// Load unsigned half-word from memory.
+    Ldw   = 0x31,
+    Ldhw  = 0x32,
     Ldhwu = 0x33,
-    /// Load byte from memory.
-    Ldb = 0x34,
-    /// Load unsigned byte from memory.
-    Ldbu = 0x35,
-    /// Store word to memory.
-    Stw = 0x36,
-    /// Store half-word to memory.
-    Sthw = 0x37,
-    /// Store byte to memory.
-    Stb = 0x38,
-    /// Jump and link by offset.
-    Jmp = 0x39,
-    /// Jump and link relative to register.
-    Jmpr = 0x3A,
-    /// Branch by offset if equal.
-    Beq = 0x3B,
-    /// Branch by offset if not equal.
-    Bne = 0x3C,
+    Ldb   = 0x34,
+    Ldbu  = 0x35,
+    Stw   = 0x36,
+    Sthw  = 0x37,
+    Stb   = 0x38,
+    Jmp   = 0x39,
+    Jmpr  = 0x3A,
+    Beq   = 0x3B,
+    Bne   = 0x3C,
 }
 
 #[derive(PartialEq)]
@@ -71,44 +55,45 @@ pub enum Encoding {
 }
 
 impl Op {
+    #[rustfmt::skip]
     pub fn name(self) -> &'static str {
         match self {
-            Op::Noop => "noop",
+            Op::Noop  => "noop",
             // Rs
-            Op::Add => "add",
-            Op::Sub => "sub",
-            Op::Shl => "shl",
-            Op::Shr => "shr",
-            Op::Or => "or",
-            Op::And => "and",
-            Op::Xor => "xor",
-            Op::Slt => "slt",
-            Op::Sltu => "sltu",
+            Op::Add   => "add",
+            Op::Sub   => "sub",
+            Op::Shl   => "shl",
+            Op::Shr   => "shr",
+            Op::Or    => "or",
+            Op::And   => "and",
+            Op::Xor   => "xor",
+            Op::Slt   => "slt",
+            Op::Sltu  => "sltu",
             // Is
-            Op::Addi => "add_i",
-            Op::Subi => "sub_i",
-            Op::Shli => "shl_i",
-            Op::Shri => "shr_i",
-            Op::Ori => "or_i",
-            Op::Orui => "oru_i",
-            Op::Andi => "and_i",
+            Op::Addi  => "add_i",
+            Op::Subi  => "sub_i",
+            Op::Shli  => "shl_i",
+            Op::Shri  => "shr_i",
+            Op::Ori   => "or_i",
+            Op::Orui  => "oru_i",
+            Op::Andi  => "and_i",
             Op::Andui => "andu_i",
-            Op::Xori => "xor_i",
+            Op::Xori  => "xor_i",
             Op::Xorui => "xoru_i",
-            Op::Slti => "slt_i",
+            Op::Slti  => "slt_i",
             Op::Sltui => "sltu_i",
-            Op::Ldw => "ldw_i",
-            Op::Ldhw => "ldhw_i",
+            Op::Ldw   => "ldw_i",
+            Op::Ldhw  => "ldhw_i",
             Op::Ldhwu => "ldhwu_i",
-            Op::Ldb => "ldb_i",
-            Op::Ldbu => "ldbu_i",
-            Op::Stw => "stw_i",
-            Op::Sthw => "sthw_i",
-            Op::Stb => "stb_i",
-            Op::Jmp => "jmp_i",
-            Op::Jmpr => "jmpr_i",
-            Op::Beq => "beq_i",
-            Op::Bne => "bne_i",
+            Op::Ldb   => "ldb_i",
+            Op::Ldbu  => "ldbu_i",
+            Op::Stw   => "stw_i",
+            Op::Sthw  => "sthw_i",
+            Op::Stb   => "stb_i",
+            Op::Jmp   => "jmp_i",
+            Op::Jmpr  => "jmpr_i",
+            Op::Beq   => "beq_i",
+            Op::Bne   => "bne_i",
         }
     }
 
@@ -1028,35 +1013,6 @@ impl Machine {
                 return Ok(());
             }
         }
-    }
-}
-
-/// Example syntax of this assembly:
-///
-/// Very basic so far, with only basic labels and instructions.
-///
-/// ```text
-/// loop:
-///      add   r5 r1 r2
-///      add_i r1 r2 0
-///      add_i r2 r5 0
-///      add_i r3 r3 1 ; r3++
-///      bne r3 r4 loop
-///      halt          ; internally jump to address 1
-///
-/// main:
-///     add_i r1 r0 0
-///     add_i r2 r0 1
-///     add_i r3 r0 0 ; (counter)
-///     add_i r4 r0 7 ; (7 iterations)
-///     jmp loop
-///
-/// ```
-mod asm {
-    use super::*;
-
-    fn assemble<'a>(source: &'a str) -> Machine {
-        todo!("not yet implemented...");
     }
 }
 

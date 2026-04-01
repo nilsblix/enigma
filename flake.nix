@@ -1,5 +1,5 @@
 {
-    description = "Homemade lisp";
+    description = "32-bit Virtual Machine";
 
     inputs = {
         nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

@@ -1,9 +1,9 @@
 #[cfg(test)]
 extern crate std;
 
+use super::*;
 use alloc::rc::Rc;
 use core::cell::{Cell, RefCell};
-use super::*;
 
 #[test]
 fn encode_and_decode_instruction() {
