@@ -1,3 +1,14 @@
+#![no_std]
+#![allow(dead_code)]
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::iter;
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -164,6 +175,25 @@ impl TryFrom<u8> for Op {
     }
 }
 
+impl TryFrom<&str> for Op {
+    type Error = ();
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        for i in 0u8..u8::MAX {
+            let op = match Op::try_from(i) {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
+
+            if s == op.name() {
+                return Ok(op);
+            }
+        }
+
+        Err(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Payload {
     Noop,
@@ -231,7 +261,7 @@ impl Instruction {
     /// Below is a bit-representation of the different instruction types.
     ///
     /// R-mode:
-    /// ```
+    /// ```text
     /// +------------------------------------+
     /// |   6  |  5  |  5  |  5  |    11     | == 32
     /// +------------------------------------+
@@ -240,7 +270,7 @@ impl Instruction {
     /// ```
     ///
     /// I-mode:
-    /// ```
+    /// ```text
     /// +------------------------------------+
     /// |   6  |  5  |  5  |       16        | == 32
     /// +------------------------------------+
@@ -631,7 +661,7 @@ impl Machine {
         let mut m = Machine {
             program_counter: ByteAddress::ZERO,
             regs: [0u32; REGISTER_COUNT],
-            blocks: std::iter::repeat_with(|| Block::Empty)
+            blocks: iter::repeat_with(|| Block::Empty)
                 .take(BLOCK_COUNT)
                 .collect::<Vec<_>>()
                 .try_into()
@@ -1004,13 +1034,41 @@ impl Machine {
     }
 }
 
-fn main() {
-    let m = Machine::new();
-    _ = m;
+
+/// Example syntax of this assembly:
+///
+/// Very basic so far, with only basic labels and instructions.
+///
+/// ```text
+/// loop:
+///      add   r5 r1 r2
+///      add_i r1 r2 0
+///      add_i r2 r5 0
+///      add_i r3 r3 1 ; r3++
+///      bne r3 r4 loop
+///      halt          ; internally jump to address 1
+///
+/// main:
+///     add_i r1 r0 0
+///     add_i r2 r0 1
+///     add_i r3 r0 0 ; (counter)
+///     add_i r4 r0 7 ; (7 iterations)
+///     jmp loop
+///
+/// ```
+mod asm {
+    use super::*;
+
+    fn assemble<'a>(source: &'a str) -> Machine {
+        todo!("not yet implemented...");
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::rc::Rc;
+    use core::cell::{Cell, RefCell};
+
     #[test]
     fn encode_and_decode_instruction() {
         //          |  op | rr | ra | rb |  packing  |
@@ -1247,10 +1305,7 @@ mod tests {
         assert_eq!(m.read_byte(ByteAddress(0x0001_0000)), 0x56);
         assert_eq!(m.read_byte(ByteAddress(0x0001_0001)), 0x78);
     }
-
     use super::*;
-    use std::cell::{Cell, RefCell};
-    use std::rc::Rc;
 
     struct TestControllerState {
         bytes: RefCell<Box<[u8; BLOCK_SIZE]>>,
