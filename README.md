@@ -22,9 +22,9 @@ Bit packed as such:
 
 Note that packing is unused.
 
-### R-type
+### I-type
 Bit packed as such:
-```ini
+```text
 +------------------------------------+
 |   6  |  5  |  5  |       16        |
 +------------------------------------+
@@ -39,7 +39,7 @@ if not handled correctly, given that there is no internal distinction between
 different segments, such as _text_, _data_, _heap_ or _stack_.
 
 Register no. 32 (r31) is the designated stack-pointer, and therefore gets
-initialized to the stack beginning, which is `0xEFFFFFF`. That is pretty much
+initialized to the stack beginning, which is `0xEFFFFFC`. That is pretty much
 the only segment known in the source-code of the VM. MMIO gets mapped above the
 stack, i.e addresses starting with `0xF...` are inherently IO.
 

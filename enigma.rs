@@ -611,7 +611,7 @@ impl Block {
 }
 
 /// We intend to map the addresses above the stack to IO.
-pub const STACK_BEGINNING: u32 = 0xEFFFFFFF;
+pub const STACK_BEGINNING: u32 = 0xEFFFFFFC;
 pub const IO_BEGINNING: u32 = 0xF0000000;
 pub const SP_INDEX: usize = REGISTER_COUNT - 1;
 
