@@ -1,17 +1,20 @@
 #![no_std]
 
 extern crate alloc;
-use alloc::boxed::Box;
-use alloc::vec::Vec;
-use core::iter;
+use alloc::{boxed::Box, collections::btree_map::BTreeMap};
 
 pub mod is;
 use is::{Instruction, InstructionError, Op, Payload};
 
 pub trait IoController {
-    fn read(&self, offset: BlockOffset) -> u8;
-    fn tick(&mut self);
-    fn write(&mut self, offset: BlockOffset, data: u8);
+    /// Some io relies on writing on read, which justifies the mutable read.
+    /// Read supports all 3 main reads, i.e: byte, halfword and word. We always
+    /// return a u32 even if we read byte or halfword. Makes the interface
+    /// simpler.
+    fn read(&mut self, mem: &mut Memory, addr: ByteAddress, width: Width) -> u32;
+    /// We always supply u32 data, even on byte and halfword write due to
+    /// simpler interface.
+    fn write(&mut self, mem: &mut Memory, addr: ByteAddress, width: Width, data: u32);
 }
 
 pub const BLOCK_SIZE: usize = 1 << 16;
@@ -26,7 +29,9 @@ pub const WORD_SIZE_BYTES: u32 = 4;
 pub enum Block {
     Empty,
     Memory(Box<[u8; BLOCK_SIZE]>),
-    Io(Box<dyn IoController>),
+    /// To get access to a certain block, you will always be able
+    /// to calculate the address.
+    Io,
 }
 
 /// A byte-granular address in the machine's flat memory space.
@@ -130,71 +135,152 @@ impl From<BlockOffset> for usize {
 }
 
 impl Block {
-    pub fn with_data(bytes: Box<[u8; BLOCK_SIZE]>) -> Block {
-        Block::Memory(bytes)
+    pub fn empty() -> Block {
+        Block::Empty
     }
 
-    pub fn with_controller(controller: impl IoController + 'static) -> Block {
-        Block::Io(Box::new(controller))
+    pub fn with_data(data: [u8; BLOCK_SIZE]) -> Block {
+        Block::Memory(Box::new(data))
     }
 
-    pub fn new_memory() -> Block {
-        Block::with_data(Box::new([0; BLOCK_SIZE]))
+    pub fn with_empty_data() -> Block {
+        Block::with_data([0u8; BLOCK_SIZE])
     }
 
-    pub fn read_byte(&self, offset: BlockOffset) -> u8 {
-        match self {
-            Block::Empty => 0,
-            Block::Memory(mem) => mem[usize::from(offset)],
-            Block::Io(con) => con.read(offset),
+    pub fn with_io() -> Block {
+        Block::Io
+    }
+}
+
+pub struct Memory {
+    /// We don't allocate the entire 4GB upfront, but instead allocate blocks of
+    /// 2^16 bytes (~4kB) at a time.
+    blocks: Box<[Block; BLOCK_COUNT]>,
+}
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum Width {
+    Byte = 1,
+    Halfword = 2,
+    Word = 4,
+}
+
+impl Memory {
+    fn new() -> Memory {
+        Memory { blocks: Box::new([const { Block::Empty }; BLOCK_COUNT]) }
+    }
+
+    pub fn reset(&mut self) {
+        for block in self.blocks.iter_mut() {
+            match block {
+                Block::Io => {}
+                Block::Empty | Block::Memory(_) => *block = Block::Empty,
+            }
         }
     }
 
-    pub fn read_half_word(&self, offset: BlockOffset) -> u16 {
-        let bytes = match self {
-            Block::Empty => return 0,
-            Block::Memory(mem) => {
-                let u = usize::from(offset);
-                [mem[u], mem[u + 1]]
-            }
-            Block::Io(con) => [con.read(offset), con.read(offset.next())],
-        };
+    pub fn block(&self, block_index: BlockIndex) -> &Block {
+        &self.blocks[usize::from(block_index)]
+    }
+
+    pub fn block_mut(&mut self, block_index: BlockIndex) -> &mut Block {
+        &mut self.blocks[usize::from(block_index)]
+    }
+
+    pub fn block_from_addr(&self, addr: ByteAddress) -> (&Block, BlockOffset) {
+        let (block_index, block_offset) = addr.into_block_parts();
+        (self.block(block_index), block_offset)
+    }
+
+    pub fn block_from_addr_mut(&mut self, addr: ByteAddress) -> (&mut Block, BlockOffset) {
+        let (block_index, block_offset) = addr.into_block_parts();
+        (self.block_mut(block_index), block_offset)
+    }
+
+    pub fn read_raw_byte(&self, addr: ByteAddress) -> u8 {
+        let (block, offset) = self.block_from_addr(addr);
+        match block {
+            Block::Empty => 0,
+            Block::Memory(mem) => mem[usize::from(offset)],
+            Block::Io => panic!("cannot read raw from io"),
+        }
+    }
+
+    pub fn read_raw_half_word(&self, addr: ByteAddress) -> u16 {
+        let (next_addr, _) = addr.overflowing_add_bytes(ByteOffset(1));
+        let bytes = [self.read_raw_byte(addr), self.read_raw_byte(next_addr)];
         u16::from_be_bytes(bytes)
     }
 
-    pub fn read_word(&self, offset: BlockOffset) -> u32 {
-        let bytes = match self {
-            Block::Empty => {
-                return 0;
-            }
-            Block::Memory(mem) => {
-                let u = usize::from(offset);
-                [mem[u], mem[u + 1], mem[u + 2], mem[u + 3]]
-            }
-            Block::Io(con) => {
-                let u0 = offset;
-                let u1 = u0.next();
-                let u2 = u1.next();
-                let u3 = u2.next();
-                [con.read(u0), con.read(u1), con.read(u2), con.read(u3)]
-            }
-        };
+    pub fn read_raw_word(&self, addr: ByteAddress) -> u32 {
+        let (addr_1, _) = addr.overflowing_add_bytes(ByteOffset(1));
+        let (addr_2, _) = addr.overflowing_add_bytes(ByteOffset(2));
+        let (addr_3, _) = addr.overflowing_add_bytes(ByteOffset(3));
+        let bytes = [
+            self.read_raw_byte(addr),
+            self.read_raw_byte(addr_1),
+            self.read_raw_byte(addr_2),
+            self.read_raw_byte(addr_3),
+        ];
         u32::from_be_bytes(bytes)
     }
 
-    pub fn write_byte(&mut self, offset: BlockOffset, byte: u8) {
-        match self {
+    /// Justification of u32 is described in the definition of the IoController
+    /// interface.
+    pub fn read_io(
+        &mut self,
+        io: &mut Box<dyn IoController>,
+        addr: ByteAddress,
+        width: Width,
+    ) -> u32 {
+        io.read(self, addr, width)
+    }
+
+    pub fn write_raw_byte(&mut self, addr: ByteAddress, data: u8) {
+        let (block, offset) = self.block_from_addr_mut(addr);
+        match block {
             Block::Empty => {
-                *self = Block::new_memory();
-                self.write_byte(offset, byte);
-            }
-            Block::Memory(mem) => mem[usize::from(offset)] = byte,
-            Block::Io(con) => con.write(offset, byte),
+                *block = Block::with_empty_data();
+                self.write_raw_byte(addr, data);
+            },
+            Block::Memory(mem) => mem[usize::from(offset)] = data,
+            Block::Io => panic!("cannot write raw byte to io"),
         }
+    }
+
+    pub fn write_raw_half_word(&mut self, addr: ByteAddress, data: u16) {
+        let (next_addr, _) = addr.overflowing_add_bytes(ByteOffset(1));
+        let bytes = data.to_be_bytes();
+        self.write_raw_byte(addr, bytes[0]);
+        self.write_raw_byte(next_addr, bytes[1]);
+    }
+
+    pub fn write_raw_word(&mut self, addr: ByteAddress, data: u32) {
+        let (addr_1, _) = addr.overflowing_add_bytes(ByteOffset(1));
+        let (addr_2, _) = addr.overflowing_add_bytes(ByteOffset(2));
+        let (addr_3, _) = addr.overflowing_add_bytes(ByteOffset(3));
+        let bytes = data.to_be_bytes();
+        self.write_raw_byte(addr, bytes[0]);
+        self.write_raw_byte(addr_1, bytes[1]);
+        self.write_raw_byte(addr_2, bytes[2]);
+        self.write_raw_byte(addr_3, bytes[3]);
+    }
+
+    pub fn write_io(
+        &mut self,
+        io: &mut Box<dyn IoController>,
+        addr: ByteAddress,
+        width: Width,
+        data: u32,
+    ) {
+        io.write(self, addr, width, data);
     }
 }
 
 /// We intend to map the addresses above the stack to IO.
+///
+/// Note that the stack beginning should be divisible by the word-size, which
+/// makes sense, i guess?
 pub const STACK_BEGINNING: u32 = 0xEFFFFFFC;
 pub const IO_BEGINNING: u32 = 0xF0000000;
 pub const SP_INDEX: usize = REGISTER_COUNT - 1;
@@ -202,9 +288,10 @@ pub const SP_INDEX: usize = REGISTER_COUNT - 1;
 pub struct Machine {
     program_counter: ByteAddress,
     regs: [u32; REGISTER_COUNT],
-    /// We don't allocate the entire 4GB upfront, but instead allocate blocks of
-    /// 2^16 bytes (~4kB) at a time.
-    blocks: Box<[Block; BLOCK_COUNT]>,
+    mem: Memory,
+    /// Each io gets mapped to the range between a base address + 2^16 bytes,
+    /// i.e some BlockIndex.
+    ios: BTreeMap<BlockIndex, Box<dyn IoController>>,
 }
 
 /// The side effects of the VM successfully executing a single instruction.
@@ -227,12 +314,8 @@ impl Machine {
         let mut m = Machine {
             program_counter: ByteAddress::ZERO,
             regs: [0u32; REGISTER_COUNT],
-            blocks: iter::repeat_with(|| Block::Empty)
-                .take(BLOCK_COUNT)
-                .collect::<Vec<_>>()
-                .try_into()
-                .map_err(|_| ())
-                .expect("failed to initialize memory-blocks"),
+            mem: Memory::new(),
+            ios: BTreeMap::new(),
         };
         m.regs[SP_INDEX] = STACK_BEGINNING;
         m
@@ -252,21 +335,24 @@ impl Machine {
         }
     }
 
-    pub fn attach_controller(&mut self, con: impl IoController + 'static) -> Option<BlockIndex> {
+    pub fn attach_controller(&mut self, io: impl IoController + 'static) -> Option<ByteAddress> {
         let mut addr = ByteAddress(IO_BEGINNING);
         loop {
-            if matches!(self.block_from_addr(addr).0, Block::Empty) {
-                *self.block_from_addr_mut(addr).0 = Block::with_controller(con);
+            if matches!(self.mem.block_from_addr(addr).0, Block::Empty) {
                 let (block_index, _) = addr.into_block_parts();
-                return Some(block_index);
+                *self.mem.block_from_addr_mut(addr).0 = Block::with_io();
+                self.ios.insert(block_index, Box::new(io));
+                return Some(addr);
             }
+
+            // This breaks out when no next block exists.
             addr = addr.next_block()?;
         }
     }
 
     pub fn detach_controller(&mut self, block_idx: BlockIndex) -> Option<()> {
-        let b = self.block_mut(block_idx);
-        *b = Block::Empty;
+        self.ios.remove(&block_idx).map(|_| ())?;
+        *self.mem.block_mut(block_idx) = Block::Empty;
         Some(())
     }
 
@@ -278,12 +364,7 @@ impl Machine {
 
     pub fn reset(&mut self) {
         self.restart();
-        for block in self.blocks.iter_mut() {
-            match block {
-                Block::Io(_) => {}
-                Block::Empty | Block::Memory(_) => *block = Block::Empty,
-            }
-        }
+        self.mem.reset();
     }
 
     pub fn read_reg(&self, index: usize) -> u32 {
@@ -315,101 +396,103 @@ impl Machine {
         self.set_program_counter(addr);
     }
 
-    pub fn block(&self, block_index: BlockIndex) -> &Block {
-        &self.blocks[usize::from(block_index)]
+    pub fn io_block_index_in_span(&self, addr: ByteAddress, len_bytes: usize) -> Option<ByteAddress> {
+        let mut io_block_index = None;
+        let mut touched_ram = false;
+        for i in 0..len_bytes {
+            let (byte_addr, _) = addr.overflowing_add_bytes(ByteOffset(i as i32));
+            match self.mem.block_from_addr(addr).0 {
+                Block::Io => {
+                    let (block_index, _) = byte_addr.into_block_parts();
+
+                    assert!(!touched_ram, "MMIO access crossed RAM/IO boundary at {:#010X}", addr.0);
+                    if let Some(existing) = io_block_index {
+                        assert_eq!(
+                            existing, block_index,
+                            "MMIO access crossed controller boundaries at {:#010X}",
+                            addr.0
+                        );
+                    } else {
+                        io_block_index = Some(block_index);
+                    }
+                },
+                Block::Empty | Block::Memory(_) => {
+                    touched_ram = true;
+                    assert!(
+                        io_block_index.is_none(),
+                        "MMIO access crossed RAM/IO boundary at {:#010X}",
+                        addr.0
+                    );
+                }
+            }
+        }
+
+        io_block_index.map(|block_index| block_index.to_byte_addr())
     }
 
-    pub fn block_mut(&mut self, block_index: BlockIndex) -> &mut Block {
-        &mut self.blocks[usize::from(block_index)]
+    pub fn read_io(&mut self, addr: ByteAddress, width: Width) -> u32 {
+        let (block_index, _) = addr.into_block_parts();
+        let io = self.ios.get_mut(&block_index)
+            .expect("memory contains reference to invalid io");
+        self.mem.read_io(io, addr, width)
     }
 
-    pub fn block_from_addr(&self, addr: ByteAddress) -> (&Block, BlockOffset) {
-        let (block_index, block_offset) = addr.into_block_parts();
-        (self.block(block_index), block_offset)
+    pub fn read_byte(&mut self, addr: ByteAddress) -> u8 {
+        match self.io_block_index_in_span(addr, 1) {
+            Some(io_addr) => self.read_io(io_addr, Width::Byte) as u8,
+            None => self.mem.read_raw_byte(addr),
+        }
     }
 
-    pub fn block_from_addr_mut(&mut self, addr: ByteAddress) -> (&mut Block, BlockOffset) {
-        let (block_index, block_offset) = addr.into_block_parts();
-        (self.block_mut(block_index), block_offset)
+    pub fn read_half_word(&mut self, addr: ByteAddress) -> u16 {
+        match self.io_block_index_in_span(addr, 2) {
+            Some(io_addr) => self.read_io(io_addr, Width::Halfword) as u16,
+            None => self.mem.read_raw_half_word(addr),
+        }
     }
 
-    pub fn read_byte(&self, addr: ByteAddress) -> u8 {
-        let (block, offset) = self.block_from_addr(addr);
-        block.read_byte(offset)
+    pub fn read_word(&mut self, addr: ByteAddress) -> u32 {
+        match self.io_block_index_in_span(addr, 4) {
+            Some(io_addr) => self.read_io(io_addr, Width::Word) as u32,
+            None => self.mem.read_raw_word(addr),
+        }
     }
 
-    pub fn read_half_word(&self, addr: ByteAddress) -> u16 {
-        let (addr_1, _) = addr.overflowing_add_bytes(ByteOffset(1));
-        let bytes = [self.read_byte(addr), self.read_byte(addr_1)];
-        u16::from_be_bytes(bytes)
-    }
-
-    pub fn read_word(&self, addr: ByteAddress) -> u32 {
-        let (addr_1, _) = addr.overflowing_add_bytes(ByteOffset(1));
-        let (addr_2, _) = addr.overflowing_add_bytes(ByteOffset(2));
-        let (addr_3, _) = addr.overflowing_add_bytes(ByteOffset(3));
-        let bytes = [
-            self.read_byte(addr),
-            self.read_byte(addr_1),
-            self.read_byte(addr_2),
-            self.read_byte(addr_3),
-        ];
-        u32::from_be_bytes(bytes)
+    pub fn write_io(&mut self, addr: ByteAddress, width: Width, data: u32) {
+        let (block_index, _) = addr.into_block_parts();
+        let io = self.ios.get_mut(&block_index)
+            .expect("memory contains reference to invalid io");
+        self.mem.write_io(io, addr, width, data);
     }
 
     pub fn write_byte(&mut self, addr: ByteAddress, data: u8) {
-        let (block, offset) = self.block_from_addr_mut(addr);
-        block.write_byte(offset, data);
+        match self.io_block_index_in_span(addr, 1) {
+            Some(io_addr) => self.write_io(io_addr, Width::Byte, data as u32),
+            None => self.mem.write_raw_byte(addr, data),
+        }
     }
 
     pub fn write_half_word(&mut self, addr: ByteAddress, data: u16) {
-        let bytes = data.to_be_bytes();
-        let (addr_1, _) = addr.overflowing_add_bytes(ByteOffset(1));
-        self.write_byte(addr, bytes[0]);
-        self.write_byte(addr_1, bytes[1]);
+        match self.io_block_index_in_span(addr, 2) {
+            Some(io_addr) => self.write_io(io_addr, Width::Halfword, data as u32),
+            None => self.mem.write_raw_half_word(addr, data),
+        }
     }
 
     pub fn write_word(&mut self, addr: ByteAddress, data: u32) {
-        let bytes = data.to_be_bytes();
-        let (addr_1, _) = addr.overflowing_add_bytes(ByteOffset(1));
-        let (addr_2, _) = addr.overflowing_add_bytes(ByteOffset(2));
-        let (addr_3, _) = addr.overflowing_add_bytes(ByteOffset(3));
-        self.write_byte(addr, bytes[0]);
-        self.write_byte(addr_1, bytes[1]);
-        self.write_byte(addr_2, bytes[2]);
-        self.write_byte(addr_3, bytes[3]);
-    }
-
-    pub fn is_io_at_addr(&self, addr: ByteAddress) -> bool {
-        let (block_index, _) = addr.into_block_parts();
-        match self.blocks[usize::from(block_index)] {
-            Block::Empty | Block::Memory(_) => false,
-            Block::Io(_) => true,
+        match self.io_block_index_in_span(addr, 4) {
+            Some(io_addr) => self.write_io(io_addr, Width::Word, data as u32),
+            None => self.mem.write_raw_word(addr, data),
         }
     }
 
-    fn tick_some_io(&mut self, addr: ByteAddress, len_bytes: usize) {
-        let mut prev_block_index = None;
-        for i in 0..len_bytes {
-            let byte_addr = addr.overflowing_add_bytes(ByteOffset(i as i32)).0;
-            let block_index = usize::from(byte_addr.into_block_parts().0);
-            if prev_block_index.is_some_and(|p| p == block_index) {
-                continue;
-            }
 
-            prev_block_index = Some(block_index);
-            if let Block::Io(con) = self.block_from_addr_mut(byte_addr).0 {
-                con.tick();
-            }
-        }
-    }
-
-    pub fn instruction_at(&self, addr: ByteAddress) -> Result<Instruction, InstructionError> {
+    pub fn instruction_at(&mut self, addr: ByteAddress) -> Result<Instruction, InstructionError> {
         let inst = self.read_word(addr);
         Instruction::decode(inst)
     }
 
-    pub fn current_instruction(&self) -> Result<Instruction, InstructionError> {
+    pub fn current_instruction(&mut self) -> Result<Instruction, InstructionError> {
         self.instruction_at(self.program_counter)
     }
 
@@ -463,7 +546,6 @@ impl Machine {
         let r_r = self.read_reg(rr);
         let r_a = self.read_reg(ra);
         let mut jumped = false;
-        let mut to_tick = None;
 
         let result = match op {
             Op::Addi => Some(r_a.wrapping_add(imm as u32)),
@@ -485,54 +567,46 @@ impl Machine {
             Op::Ldw => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
-                to_tick = Some((addr, WORD_SIZE_BYTES));
                 Some(self.read_word(addr))
             }
             Op::Ldhw => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
-                to_tick = Some((addr, WORD_SIZE_BYTES / 2));
                 // Some maneuvering for preserving signedness.
                 Some(self.read_half_word(addr) as i16 as i32 as u32)
             }
             Op::Ldhwu => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
-                to_tick = Some((addr, WORD_SIZE_BYTES / 2));
                 Some(self.read_half_word(addr) as u32)
             }
             Op::Ldb => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
-                to_tick = Some((addr, 1));
                 // Some maneuvering for preserving signedness.
                 Some(self.read_byte(addr) as i8 as i32 as u32)
             }
             Op::Ldbu => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
-                to_tick = Some((addr, 1));
                 Some(self.read_byte(addr) as u32)
             }
             Op::Stw => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 self.write_word(addr, r_r);
-                to_tick = Some((addr, WORD_SIZE_BYTES));
                 None
             }
             Op::Sthw => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 self.write_half_word(addr, r_r as u16);
-                to_tick = Some((addr, WORD_SIZE_BYTES / 2));
                 None
             }
             Op::Stb => {
                 let byte_offset = ByteOffset::from_immediate(imm);
                 let (addr, _) = ByteAddress(r_a).overflowing_add_bytes(byte_offset);
                 self.write_byte(addr, r_r as u8);
-                to_tick = Some((addr, 1));
                 None
             }
             Op::Jmp => {
@@ -571,10 +645,6 @@ impl Machine {
 
         if let Some(result) = result {
             self.set_reg(rr, result);
-        }
-
-        if let Some((addr, len_bytes)) = to_tick {
-            self.tick_some_io(addr, len_bytes as usize);
         }
 
         InstructionOutcome { jumped }
