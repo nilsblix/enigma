@@ -824,7 +824,7 @@ impl Machine {
         self.instruction_at(self.program_counter)
     }
 
-    pub fn execute(&mut self, inst: &Instruction) -> InstructionOutcome {
+    pub fn exec(&mut self, inst: &Instruction) -> InstructionOutcome {
         let op = inst.op;
 
         use Payload::*;
@@ -991,7 +991,7 @@ impl Machine {
         InstructionOutcome { jumped }
     }
 
-    pub fn execute_and_advance(&mut self) -> ExecuteResult {
+    pub fn exec_and_advance(&mut self) -> ExecuteResult {
         let instruction = match self.current_instruction() {
             Ok(inst) => inst,
             Err(err) => {
@@ -999,16 +999,16 @@ impl Machine {
                 return Err(err);
             }
         };
-        let result = self.execute(&instruction);
+        let result = self.exec(&instruction);
         if !result.jumped {
             self.advance();
         }
         Ok((instruction, result))
     }
 
-    pub fn execute_while_not_halt(&mut self) -> Result<(), InstructionError> {
+    pub fn exec_while_not_halt(&mut self) -> Result<(), InstructionError> {
         loop {
-            let (inst, _) = self.execute_and_advance()?;
+            let (inst, _) = self.exec_and_advance()?;
             if inst == Instruction::HALT {
                 return Ok(());
             }

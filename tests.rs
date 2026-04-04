@@ -86,7 +86,7 @@ fn painfully_written_execute_and_advance() {
     mem.as_mut_slice()[3] = bytes[3];
     m.blocks[0] = Block::Memory(mem);
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
     assert_eq!(m.read_reg(1), 69);
 }
@@ -112,14 +112,14 @@ fn execute_and_advance() {
     m.set_reg(4, 67);
     m.set_reg(5, 2);
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
     assert_eq!(m.read_reg(1), 67);
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(outcome.1.jumped);
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
     assert_eq!(m.read_reg(6), 268);
 }
@@ -134,11 +134,11 @@ fn jump_and_link_uses_word_offsets() {
 
     let mut m = Machine::from_instructions(instructions.as_slice());
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(outcome.1.jumped);
     assert_eq!(m.read_reg(1), WORD_SIZE_BYTES);
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
     assert_eq!(m.read_reg(2), 9);
 }
@@ -155,11 +155,11 @@ fn register_relative_jump_uses_word_offsets() {
     let mut m = Machine::from_instructions(instructions.as_slice());
     m.set_reg(3, WORD_SIZE_BYTES);
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(outcome.1.jumped);
     assert_eq!(m.read_reg(1), WORD_SIZE_BYTES);
 
-    let outcome = m.execute_and_advance().unwrap();
+    let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
     assert_eq!(m.read_reg(2), 11);
 }
@@ -185,7 +185,7 @@ fn simple_store_and_load() {
     m.set_reg(3, 0xBEEF);
     m.set_reg(4, 0xAB);
 
-    m.execute_while_not_halt().unwrap();
+    m.exec_while_not_halt().unwrap();
 
     assert_eq!(m.read_reg(1), 0);
     assert_eq!(m.read_reg(3), 0);
@@ -220,7 +220,7 @@ fn signed_and_unsigned_loads_extend_correctly() {
     m.write_half_word(ByteAddress(0x20_010), 0x8001);
     m.write_byte(ByteAddress(0x20_020), 0x80);
 
-    m.execute_while_not_halt().unwrap();
+    m.exec_while_not_halt().unwrap();
 
     assert_eq!(m.read_reg(1), 0xFFFF_8001);
     assert_eq!(m.read_reg(2), 0x0000_8001);
@@ -249,7 +249,7 @@ fn program_fibonacci() {
         /* 1 */ Instruction::addi(2, 0, 1), // r2 = 1
         /* 2 */ Instruction::addi(3, 0, 0), // r3 = 0 (counter)
         /* 3 */ Instruction::addi(4, 0, 7), // r4 = 7 (iterations for fib(8))
-        /* 4 */ Instruction::add(5, 1, 2),  // r5 = r1 + r2
+        /* 4 */ Instruction::add(5, 1, 2), // r5 = r1 + r2
         /* 5 */ Instruction::addi(1, 2, 0), // r1 = r2 (addi r1, r2, 0)
         /* 6 */ Instruction::addi(2, 5, 0), // r2 = r5
         /* 7 */ Instruction::addi(3, 3, 1), // r3++
@@ -258,7 +258,7 @@ fn program_fibonacci() {
     ];
 
     let mut m = Machine::from_instructions(instructions);
-    m.execute_while_not_halt().unwrap();
+    m.exec_while_not_halt().unwrap();
     assert_eq!(m.read_reg(2), 21);
 }
 
@@ -365,7 +365,7 @@ fn word_load_spanning_ram_and_io_ticks_the_io_controller() {
     m.write_byte(ByteAddress(IO_BEGINNING - 1), 0xAA);
     m.set_reg(2, IO_BEGINNING - 1);
 
-    m.execute_while_not_halt().unwrap();
+    m.exec_while_not_halt().unwrap();
 
     assert_eq!(m.read_reg(1), 0xAABB_CCDD);
     assert_eq!(state.ticks.get(), 1);
@@ -388,7 +388,7 @@ fn word_load_spanning_two_io_blocks_ticks_both_controllers() {
         .unwrap();
     m.set_reg(2, IO_BEGINNING + BLOCK_SIZE as u32 - 1);
 
-    m.execute_while_not_halt().unwrap();
+    m.exec_while_not_halt().unwrap();
 
     assert_eq!(m.read_reg(1), 0x1122_3344);
     assert_eq!(state_a.ticks.get(), 1);

@@ -3,7 +3,7 @@ set -e
 cargo test --quiet
 cargo build --quiet
 cargo fmt
-cd impls
+cd examples
 cargo build --quiet
 cargo fmt
 cd ..
