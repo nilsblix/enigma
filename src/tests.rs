@@ -71,8 +71,8 @@ fn encode_and_decode_instruction() {
 #[test]
 fn painfully_written_execute_and_advance() {
     let mut m = Machine::new();
-    m.set_reg(2, 34);
-    m.set_reg(3, 35);
+    m.write_register(2, 34);
+    m.write_register(3, 35);
 
     // add r0, r1, r2
     //          |  op | rr | ra | rb |  packing  |
@@ -84,11 +84,11 @@ fn painfully_written_execute_and_advance() {
     mem.as_mut_slice()[1] = bytes[1];
     mem.as_mut_slice()[2] = bytes[2];
     mem.as_mut_slice()[3] = bytes[3];
-    m.blocks[0] = Block::Memory(mem);
+    m.mem.blocks[0] = Block::Memory(mem);
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
-    assert_eq!(m.read_reg(1), 69);
+    assert_eq!(m.read_register(1), 69);
 }
 
 #[test]
@@ -107,21 +107,21 @@ fn execute_and_advance() {
     ];
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    m.set_reg(2, 33);
-    m.set_reg(3, 34);
-    m.set_reg(4, 67);
-    m.set_reg(5, 2);
+    m.write_register(2, 33);
+    m.write_register(3, 34);
+    m.write_register(4, 67);
+    m.write_register(5, 2);
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
-    assert_eq!(m.read_reg(1), 67);
+    assert_eq!(m.read_register(1), 67);
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(outcome.1.jumped);
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
-    assert_eq!(m.read_reg(6), 268);
+    assert_eq!(m.read_register(6), 268);
 }
 
 #[test]
@@ -136,11 +136,11 @@ fn jump_and_link_uses_word_offsets() {
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(outcome.1.jumped);
-    assert_eq!(m.read_reg(1), WORD_SIZE_BYTES);
+    assert_eq!(m.read_register(1), WORD_SIZE_BYTES);
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
-    assert_eq!(m.read_reg(2), 9);
+    assert_eq!(m.read_register(2), 9);
 }
 
 #[test]
@@ -153,15 +153,15 @@ fn register_relative_jump_uses_word_offsets() {
     ];
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    m.set_reg(3, WORD_SIZE_BYTES);
+    m.write_register(3, WORD_SIZE_BYTES);
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(outcome.1.jumped);
-    assert_eq!(m.read_reg(1), WORD_SIZE_BYTES);
+    assert_eq!(m.read_register(1), WORD_SIZE_BYTES);
 
     let outcome = m.exec_and_advance().unwrap();
     assert!(!outcome.1.jumped);
-    assert_eq!(m.read_reg(2), 11);
+    assert_eq!(m.read_register(2), 11);
 }
 
 #[test]
@@ -180,28 +180,23 @@ fn simple_store_and_load() {
     ];
 
     let mut m = Machine::from_instructions(is.as_slice());
-    m.set_reg(1, 0x1234_5678);
-    m.set_reg(2, 0x20000);
-    m.set_reg(3, 0xBEEF);
-    m.set_reg(4, 0xAB);
+    m.write_register(1, 0x1234_5678);
+    m.write_register(2, 0x20000);
+    m.write_register(3, 0xBEEF);
+    m.write_register(4, 0xAB);
 
     m.exec_while_not_halt().unwrap();
 
-    assert_eq!(m.read_reg(1), 0);
-    assert_eq!(m.read_reg(3), 0);
-    assert_eq!(m.read_reg(4), 0);
-    assert_eq!(m.read_reg(5), 0x1234_5678);
-    assert_eq!(m.read_reg(6), 0x0000_BEEF);
-    assert_eq!(m.read_reg(7), 0x0000_00AB);
+    assert_eq!(m.read_register(1), 0);
+    assert_eq!(m.read_register(3), 0);
+    assert_eq!(m.read_register(4), 0);
+    assert_eq!(m.read_register(5), 0x1234_5678);
+    assert_eq!(m.read_register(6), 0x0000_BEEF);
+    assert_eq!(m.read_register(7), 0x0000_00AB);
 
-    let (block, word_offset) = m.block_from_addr(ByteAddress(0x20_100));
-    assert_eq!(block.read_word(word_offset), 0x1234_5678);
-
-    let (block, half_word_offset) = m.block_from_addr(ByteAddress(0x20_104));
-    assert_eq!(block.read_half_word(half_word_offset), 0xBEEF);
-
-    let (block, byte_offset) = m.block_from_addr(ByteAddress(0x20_106));
-    assert_eq!(block.read_byte(byte_offset), 0xAB);
+    assert_eq!(m.mem.read_raw_word(ByteAddress(0x20_100)), 0x1234_5678);
+    assert_eq!(m.mem.read_raw_half_word(ByteAddress(0x20_104)), 0xBEEF);
+    assert_eq!(m.mem.read_raw_byte(ByteAddress(0x20_106)), 0xAB);
 }
 
 #[test]
@@ -215,17 +210,17 @@ fn signed_and_unsigned_loads_extend_correctly() {
     ];
 
     let mut m = Machine::from_instructions(is.as_slice());
-    m.set_reg(10, 0x20_000);
+    m.write_register(10, 0x20_000);
 
     m.write_half_word(ByteAddress(0x20_010), 0x8001);
     m.write_byte(ByteAddress(0x20_020), 0x80);
 
     m.exec_while_not_halt().unwrap();
 
-    assert_eq!(m.read_reg(1), 0xFFFF_8001);
-    assert_eq!(m.read_reg(2), 0x0000_8001);
-    assert_eq!(m.read_reg(3), 0xFFFF_FF80);
-    assert_eq!(m.read_reg(4), 0x0000_0080);
+    assert_eq!(m.read_register(1), 0xFFFF_8001);
+    assert_eq!(m.read_register(2), 0x0000_8001);
+    assert_eq!(m.read_register(3), 0xFFFF_FF80);
+    assert_eq!(m.read_register(4), 0x0000_0080);
 }
 
 #[test]
@@ -259,46 +254,65 @@ fn program_fibonacci() {
 
     let mut m = Machine::from_instructions(instructions);
     m.exec_while_not_halt().unwrap();
-    assert_eq!(m.read_reg(2), 21);
+    assert_eq!(m.read_register(2), 21);
 }
 
 struct TestControllerState {
     bytes: RefCell<Box<[u8; BLOCK_SIZE]>>,
-    ticks: Cell<u32>,
+    reads: Cell<u32>,
+    writes: Cell<u32>,
 }
 
 struct TestController {
     state: Rc<TestControllerState>,
 }
 
-struct NullController;
-
 impl IoController for TestController {
-    fn read(&self, offset: BlockOffset) -> u8 {
-        self.state.bytes.borrow()[usize::from(offset)]
+    fn read(&mut self, _mem: &mut Memory, addr: ByteAddress, width: Width) -> u32 {
+        self.state.reads.set(self.state.reads.get() + 1);
+        let (_, offset) = addr.into_block_parts();
+        let offset = usize::from(offset);
+        let bytes = self.state.bytes.borrow();
+        match width {
+            Width::Byte => bytes[offset] as u32,
+            Width::Halfword => u16::from_be_bytes([bytes[offset], bytes[offset + 1]]) as u32,
+            Width::Word => u32::from_be_bytes([
+                bytes[offset],
+                bytes[offset + 1],
+                bytes[offset + 2],
+                bytes[offset + 3],
+            ]),
+        }
     }
 
-    fn tick(&mut self) {
-        self.state.ticks.set(self.state.ticks.get() + 1);
+    fn write(&mut self, _mem: &mut Memory, addr: ByteAddress, width: Width, data: u32) {
+        self.state.writes.set(self.state.writes.get() + 1);
+        let (_, offset) = addr.into_block_parts();
+        let offset = usize::from(offset);
+        let mut bytes = self.state.bytes.borrow_mut();
+        match width {
+            Width::Byte => bytes[offset] = data as u8,
+            Width::Halfword => {
+                let data = (data as u16).to_be_bytes();
+                bytes[offset] = data[0];
+                bytes[offset + 1] = data[1];
+            }
+            Width::Word => {
+                let data = data.to_be_bytes();
+                bytes[offset] = data[0];
+                bytes[offset + 1] = data[1];
+                bytes[offset + 2] = data[2];
+                bytes[offset + 3] = data[3];
+            }
+        }
     }
-
-    fn write(&mut self, offset: BlockOffset, data: u8) {
-        self.state.bytes.borrow_mut()[usize::from(offset)] = data;
-    }
-}
-
-impl IoController for NullController {
-    fn read(&self, _offset: BlockOffset) -> u8 {
-        0
-    }
-    fn tick(&mut self) {}
-    fn write(&mut self, _offset: BlockOffset, _data: u8) {}
 }
 
 fn new_test_controller() -> (TestController, Rc<TestControllerState>) {
     let state = Rc::new(TestControllerState {
         bytes: RefCell::new(Box::new([0; BLOCK_SIZE])),
-        ticks: Cell::new(0),
+        reads: Cell::new(0),
+        writes: Cell::new(0),
     });
     (
         TestController {
@@ -309,34 +323,19 @@ fn new_test_controller() -> (TestController, Rc<TestControllerState>) {
 }
 
 #[test]
-fn reset_preserves_io_controllers() {
-    let (controller, state) = new_test_controller();
-    state.bytes.borrow_mut()[0] = 0xAB;
-
-    let mut m = Machine::new();
-    let idx = m.attach_controller(controller).unwrap();
-    let addr = idx.to_byte_addr();
-    m.write_byte(ByteAddress(0x100), 0xCD);
-
-    m.reset();
-
-    assert!(m.is_io_at_addr(addr));
-    assert_eq!(m.read_byte(addr), 0xAB);
-    assert_eq!(m.read_byte(ByteAddress(0x100)), 0);
-}
-
-#[test]
 fn with_controller_skips_non_empty_io_window_blocks() {
     let (controller, _) = new_test_controller();
     let mut m = Machine::new();
     m.write_byte(ByteAddress(IO_BEGINNING), 0xAA);
 
-    let idx = m.attach_controller(controller).unwrap();
-    let addr = idx.to_byte_addr();
+    let addr = m.attach_io_controller(controller).unwrap();
 
-    assert!(!m.is_io_at_addr(ByteAddress(IO_BEGINNING)));
+    assert!(!matches!(
+        m.mem.block_from_addr(ByteAddress(IO_BEGINNING)).0,
+        Block::Io
+    ));
     assert_eq!(m.read_byte(ByteAddress(IO_BEGINNING)), 0xAA);
-    assert!(m.is_io_at_addr(addr));
+    assert!(matches!(m.mem.block_from_addr(addr).0, Block::Io));
 }
 
 #[test]
@@ -344,18 +343,19 @@ fn with_controller_returns_error_when_no_io_slots_remain() {
     let mut m = Machine::new();
     let (start_block, _) = ByteAddress(IO_BEGINNING).into_block_parts();
     for index in usize::from(start_block)..BLOCK_COUNT {
-        m.blocks[index] = Block::with_controller(NullController);
+        m.mem.blocks[index] = Block::with_io();
     }
 
     let (controller, _) = new_test_controller();
-    match m.attach_controller(controller) {
+    match m.attach_io_controller(controller) {
         Some(_) => panic!("expected controller attachment to fail"),
         None => {}
     }
 }
 
 #[test]
-fn word_load_spanning_ram_and_io_ticks_the_io_controller() {
+#[should_panic(expected = "MMIO access crossed RAM/IO boundary")]
+fn word_load_spanning_ram_and_io_panics() {
     let instructions = [Instruction::ldw(1, 2, 0), Instruction::HALT];
     let (controller, state) = new_test_controller();
     state.bytes.borrow_mut()[0] = 0xBB;
@@ -363,21 +363,19 @@ fn word_load_spanning_ram_and_io_ticks_the_io_controller() {
     state.bytes.borrow_mut()[2] = 0xDD;
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    let idx = m.attach_controller(controller).unwrap();
-    let addr = idx.to_byte_addr();
+    let addr = m.attach_io_controller(controller).unwrap();
 
     let addr_minus_1 = addr.overflowing_add_bytes(ByteOffset(-1)).0;
     m.write_byte(addr_minus_1, 0xAA);
-    m.set_reg(2, addr_minus_1.0);
+    m.write_register(2, addr_minus_1.0);
 
     m.exec_while_not_halt().unwrap();
-
-    assert_eq!(m.read_reg(1), 0xAABB_CCDD);
-    assert_eq!(state.ticks.get(), 1);
+    let _ = state;
 }
 
 #[test]
-fn word_load_spanning_two_io_blocks_ticks_both_controllers() {
+#[should_panic(expected = "MMIO access crossed controller boundaries")]
+fn word_load_spanning_two_io_blocks_panics() {
     let instructions = [Instruction::ldw(1, 2, 0), Instruction::HALT];
     let (controller_a, state_a) = new_test_controller();
     let (controller_b, state_b) = new_test_controller();
@@ -387,17 +385,29 @@ fn word_load_spanning_two_io_blocks_ticks_both_controllers() {
     state_b.bytes.borrow_mut()[2] = 0x44;
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    let idx_a = m.attach_controller(controller_a).unwrap();
-    let idx_b = m.attach_controller(controller_b).unwrap();
-    m.set_reg(2, idx_a.to_byte_addr().0 + BLOCK_SIZE as u32 - 1);
+    let addr_a = m.attach_io_controller(controller_a).unwrap();
+    let addr_b = m.attach_io_controller(controller_b).unwrap();
+    m.write_register(2, addr_a.0 + BLOCK_SIZE as u32 - 1);
+
+    m.exec_while_not_halt().unwrap();
+    let _ = (state_a, state_b, addr_b);
+}
+
+#[test]
+fn word_load_within_single_io_block_uses_single_read() {
+    let instructions = [Instruction::ldw(1, 2, 0), Instruction::HALT];
+    let (controller, state) = new_test_controller();
+    state.bytes.borrow_mut()[0] = 0x11;
+    state.bytes.borrow_mut()[1] = 0x22;
+    state.bytes.borrow_mut()[2] = 0x33;
+    state.bytes.borrow_mut()[3] = 0x44;
+
+    let mut m = Machine::from_instructions(instructions.as_slice());
+    let addr = m.attach_io_controller(controller).unwrap();
+    m.write_register(2, addr.0);
 
     m.exec_while_not_halt().unwrap();
 
-    assert_eq!(m.read_reg(1), 0x1122_3344);
-    assert_eq!(state_a.ticks.get(), 1);
-    assert_eq!(state_b.ticks.get(), 1);
-    assert_eq!(
-        idx_b.to_byte_addr(),
-        idx_a.to_byte_addr().next_block().unwrap()
-    );
+    assert_eq!(m.read_register(1), 0x1122_3344);
+    assert_eq!(state.reads.get(), 1);
 }

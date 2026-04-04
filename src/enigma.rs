@@ -167,7 +167,9 @@ pub enum Width {
 
 impl Memory {
     fn new() -> Memory {
-        Memory { blocks: Box::new([const { Block::Empty }; BLOCK_COUNT]) }
+        Memory {
+            blocks: Box::new([const { Block::Empty }; BLOCK_COUNT]),
+        }
     }
 
     pub fn reset(&mut self) {
@@ -236,13 +238,20 @@ impl Memory {
         io.read(self, addr, width)
     }
 
+    pub fn read_raw_bytes(&self, ptr: ByteAddress, buf: &mut [u8]) {
+        for i in 0..buf.len() {
+            let (addr, _) = ptr.overflowing_add_bytes(ByteOffset(i as i32));
+            buf[i] = self.read_raw_byte(addr);
+        }
+    }
+
     pub fn write_raw_byte(&mut self, addr: ByteAddress, data: u8) {
         let (block, offset) = self.block_from_addr_mut(addr);
         match block {
             Block::Empty => {
                 *block = Block::with_empty_data();
                 self.write_raw_byte(addr, data);
-            },
+            }
             Block::Memory(mem) => mem[usize::from(offset)] = data,
             Block::Io => panic!("cannot write raw byte to io"),
         }
@@ -335,7 +344,7 @@ impl Machine {
         }
     }
 
-    pub fn attach_controller(&mut self, io: impl IoController + 'static) -> Option<ByteAddress> {
+    pub fn attach_io_controller(&mut self, io: impl IoController + 'static) -> Option<ByteAddress> {
         let mut addr = ByteAddress(IO_BEGINNING);
         loop {
             if matches!(self.mem.block_from_addr(addr).0, Block::Empty) {
@@ -350,28 +359,17 @@ impl Machine {
         }
     }
 
-    pub fn detach_controller(&mut self, block_idx: BlockIndex) -> Option<()> {
+    pub fn detach_io_controller(&mut self, block_idx: BlockIndex) -> Option<()> {
         self.ios.remove(&block_idx).map(|_| ())?;
         *self.mem.block_mut(block_idx) = Block::Empty;
         Some(())
     }
 
-    pub fn restart(&mut self) {
-        self.program_counter = ByteAddress(0);
-        self.regs.fill(0);
-        self.regs[SP_INDEX] = STACK_BEGINNING;
-    }
-
-    pub fn reset(&mut self) {
-        self.restart();
-        self.mem.reset();
-    }
-
-    pub fn read_reg(&self, index: usize) -> u32 {
+    pub fn read_register(&self, index: usize) -> u32 {
         self.regs[index % REGISTER_COUNT]
     }
 
-    pub fn set_reg(&mut self, index: usize, word: u32) {
+    pub fn write_register(&mut self, index: usize, word: u32) {
         let index = index % REGISTER_COUNT;
         if index == 0 {
             return;
@@ -396,16 +394,24 @@ impl Machine {
         self.set_program_counter(addr);
     }
 
-    pub fn io_block_index_in_span(&self, addr: ByteAddress, len_bytes: usize) -> Option<ByteAddress> {
+    pub fn io_block_index_in_span(
+        &self,
+        addr: ByteAddress,
+        len_bytes: usize,
+    ) -> Option<ByteAddress> {
         let mut io_block_index = None;
         let mut touched_ram = false;
         for i in 0..len_bytes {
             let (byte_addr, _) = addr.overflowing_add_bytes(ByteOffset(i as i32));
-            match self.mem.block_from_addr(addr).0 {
+            match self.mem.block_from_addr(byte_addr).0 {
                 Block::Io => {
                     let (block_index, _) = byte_addr.into_block_parts();
 
-                    assert!(!touched_ram, "MMIO access crossed RAM/IO boundary at {:#010X}", addr.0);
+                    assert!(
+                        !touched_ram,
+                        "MMIO access crossed RAM/IO boundary at {:#010X}",
+                        addr.0
+                    );
                     if let Some(existing) = io_block_index {
                         assert_eq!(
                             existing, block_index,
@@ -415,7 +421,7 @@ impl Machine {
                     } else {
                         io_block_index = Some(block_index);
                     }
-                },
+                }
                 Block::Empty | Block::Memory(_) => {
                     touched_ram = true;
                     assert!(
@@ -432,60 +438,63 @@ impl Machine {
 
     pub fn read_io(&mut self, addr: ByteAddress, width: Width) -> u32 {
         let (block_index, _) = addr.into_block_parts();
-        let io = self.ios.get_mut(&block_index)
+        let io = self
+            .ios
+            .get_mut(&block_index)
             .expect("memory contains reference to invalid io");
         self.mem.read_io(io, addr, width)
     }
 
     pub fn read_byte(&mut self, addr: ByteAddress) -> u8 {
         match self.io_block_index_in_span(addr, 1) {
-            Some(io_addr) => self.read_io(io_addr, Width::Byte) as u8,
+            Some(_) => self.read_io(addr, Width::Byte) as u8,
             None => self.mem.read_raw_byte(addr),
         }
     }
 
     pub fn read_half_word(&mut self, addr: ByteAddress) -> u16 {
         match self.io_block_index_in_span(addr, 2) {
-            Some(io_addr) => self.read_io(io_addr, Width::Halfword) as u16,
+            Some(_) => self.read_io(addr, Width::Halfword) as u16,
             None => self.mem.read_raw_half_word(addr),
         }
     }
 
     pub fn read_word(&mut self, addr: ByteAddress) -> u32 {
         match self.io_block_index_in_span(addr, 4) {
-            Some(io_addr) => self.read_io(io_addr, Width::Word) as u32,
+            Some(_) => self.read_io(addr, Width::Word) as u32,
             None => self.mem.read_raw_word(addr),
         }
     }
 
     pub fn write_io(&mut self, addr: ByteAddress, width: Width, data: u32) {
         let (block_index, _) = addr.into_block_parts();
-        let io = self.ios.get_mut(&block_index)
+        let io = self
+            .ios
+            .get_mut(&block_index)
             .expect("memory contains reference to invalid io");
         self.mem.write_io(io, addr, width, data);
     }
 
     pub fn write_byte(&mut self, addr: ByteAddress, data: u8) {
         match self.io_block_index_in_span(addr, 1) {
-            Some(io_addr) => self.write_io(io_addr, Width::Byte, data as u32),
+            Some(_) => self.write_io(addr, Width::Byte, data as u32),
             None => self.mem.write_raw_byte(addr, data),
         }
     }
 
     pub fn write_half_word(&mut self, addr: ByteAddress, data: u16) {
         match self.io_block_index_in_span(addr, 2) {
-            Some(io_addr) => self.write_io(io_addr, Width::Halfword, data as u32),
+            Some(_) => self.write_io(addr, Width::Halfword, data as u32),
             None => self.mem.write_raw_half_word(addr, data),
         }
     }
 
     pub fn write_word(&mut self, addr: ByteAddress, data: u32) {
         match self.io_block_index_in_span(addr, 4) {
-            Some(io_addr) => self.write_io(io_addr, Width::Word, data as u32),
+            Some(_) => self.write_io(addr, Width::Word, data as u32),
             None => self.mem.write_raw_word(addr, data),
         }
     }
-
 
     pub fn instruction_at(&mut self, addr: ByteAddress) -> Result<Instruction, InstructionError> {
         let inst = self.read_word(addr);
@@ -510,8 +519,8 @@ impl Machine {
     const SHIFT_MASK: u32 = 0x1F;
 
     fn exec_r_type(&mut self, op: Op, rr: usize, ra: usize, rb: usize) -> InstructionOutcome {
-        let r_a = self.read_reg(ra);
-        let r_b = self.read_reg(rb);
+        let r_a = self.read_register(ra);
+        let r_b = self.read_register(rb);
 
         let result = match op {
             Op::Add => r_a.wrapping_add(r_b),
@@ -538,13 +547,13 @@ impl Machine {
             _ => panic!("invalid R-type opcode: {}", op.name()),
         };
 
-        self.set_reg(rr, result);
+        self.write_register(rr, result);
         InstructionOutcome { jumped: false }
     }
 
     fn exec_i_type(&mut self, op: Op, rr: usize, ra: usize, imm: u16) -> InstructionOutcome {
-        let r_r = self.read_reg(rr);
-        let r_a = self.read_reg(ra);
+        let r_r = self.read_register(rr);
+        let r_a = self.read_register(ra);
         let mut jumped = false;
 
         let result = match op {
@@ -644,7 +653,7 @@ impl Machine {
         };
 
         if let Some(result) = result {
-            self.set_reg(rr, result);
+            self.write_register(rr, result);
         }
 
         InstructionOutcome { jumped }
