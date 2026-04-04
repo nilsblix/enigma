@@ -334,9 +334,9 @@ fn with_controller_skips_non_empty_io_window_blocks() {
     let idx = m.attach_controller(controller).unwrap();
     let addr = idx.to_byte_addr();
 
-    assert!(!m.is_io_at_addr(addr));
-    assert_eq!(m.read_byte(addr), 0xAA);
-    assert!(m.is_io_at_addr(addr.next_block().unwrap()));
+    assert!(!m.is_io_at_addr(ByteAddress(IO_BEGINNING)));
+    assert_eq!(m.read_byte(ByteAddress(IO_BEGINNING)), 0xAA);
+    assert!(m.is_io_at_addr(addr));
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn with_controller_returns_error_when_no_io_slots_remain() {
     let (controller, _) = new_test_controller();
     match m.attach_controller(controller) {
         Some(_) => panic!("expected controller attachment to fail"),
-        None => {},
+        None => {}
     }
 }
 
@@ -363,7 +363,7 @@ fn word_load_spanning_ram_and_io_ticks_the_io_controller() {
     state.bytes.borrow_mut()[2] = 0xDD;
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    let idx = m.attach_controller(controller) .unwrap();
+    let idx = m.attach_controller(controller).unwrap();
     let addr = idx.to_byte_addr();
 
     let addr_minus_1 = addr.overflowing_add_bytes(ByteOffset(-1)).0;
@@ -389,11 +389,15 @@ fn word_load_spanning_two_io_blocks_ticks_both_controllers() {
     let mut m = Machine::from_instructions(instructions.as_slice());
     let idx_a = m.attach_controller(controller_a).unwrap();
     let idx_b = m.attach_controller(controller_b).unwrap();
-    m.set_reg(2, IO_BEGINNING + BLOCK_SIZE as u32 - 1);
+    m.set_reg(2, idx_a.to_byte_addr().0 + BLOCK_SIZE as u32 - 1);
 
     m.exec_while_not_halt().unwrap();
 
     assert_eq!(m.read_reg(1), 0x1122_3344);
     assert_eq!(state_a.ticks.get(), 1);
     assert_eq!(state_b.ticks.get(), 1);
+    assert_eq!(
+        idx_b.to_byte_addr(),
+        idx_a.to_byte_addr().next_block().unwrap()
+    );
 }

@@ -10,7 +10,9 @@ use core::iter;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Noop  = 0x00,
-    //    ========== R-types ==========
+    ///////////////////////////////////////////////////////////////////////////
+    // R types
+    ///////////////////////////////////////////////////////////////////////////
     Add   = 0x01,
     Sub   = 0x02,
     Shl   = 0x03,
@@ -20,7 +22,9 @@ pub enum Op {
     Xor   = 0x07,
     Slt   = 0x08,
     Sltu  = 0x09,
-    //    ========== I-types ==========
+    ///////////////////////////////////////////////////////////////////////////
+    // I types
+    ///////////////////////////////////////////////////////////////////////////
     Addi  = 0x21,
     Subi  = 0x22,
     Shli  = 0x23,
@@ -59,7 +63,9 @@ impl Op {
     pub fn name(self) -> &'static str {
         match self {
             Op::Noop  => "noop",
-            // Rs
+            ////////////////////////////////////////////////////////////////////
+            // R types
+            ////////////////////////////////////////////////////////////////////
             Op::Add   => "add",
             Op::Sub   => "sub",
             Op::Shl   => "shl",
@@ -69,7 +75,9 @@ impl Op {
             Op::Xor   => "xor",
             Op::Slt   => "slt",
             Op::Sltu  => "sltu",
-            // Is
+            ////////////////////////////////////////////////////////////////////
+            // I types
+            ////////////////////////////////////////////////////////////////////
             Op::Addi  => "add_i",
             Op::Subi  => "sub_i",
             Op::Shli  => "shl_i",
@@ -515,7 +523,7 @@ impl ByteAddress {
     }
 
     pub fn from_block_index(idx: BlockIndex) -> ByteAddress {
-        ByteAddress((idx.0 << 16) as u32)
+        ByteAddress((u32::from(idx.0)) << 16)
     }
 }
 
@@ -678,10 +686,7 @@ impl Machine {
         }
     }
 
-    pub fn attach_controller(
-        &mut self,
-        con: impl IoController + 'static,
-    ) -> Option<BlockIndex> {
+    pub fn attach_controller(&mut self, con: impl IoController + 'static) -> Option<BlockIndex> {
         let mut addr = ByteAddress(IO_BEGINNING);
         loop {
             if matches!(self.block_from_addr(addr).0, Block::Empty) {
@@ -691,6 +696,12 @@ impl Machine {
             }
             addr = addr.next_block()?;
         }
+    }
+
+    pub fn detach_controller(&mut self, block_idx: BlockIndex) -> Option<()> {
+        let b = self.block_mut(block_idx);
+        *b = Block::Empty;
+        Some(())
     }
 
     pub fn restart(&mut self) {
