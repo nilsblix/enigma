@@ -457,23 +457,23 @@ pub enum Block {
 
 /// A byte-granular address in the machine's flat memory space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ByteAddress(u32);
+pub struct ByteAddress(pub u32);
 
 /// A signed displacement measured in 32-bit bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ByteOffset(i32);
+pub struct ByteOffset(pub i32);
 
 /// A signed displacement measured in 32-bit words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct WordOffset(i32);
+pub struct WordOffset(pub i32);
 
 /// Selects one 64KiB memory block within the sparse address space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BlockIndex(u16);
+pub struct BlockIndex(pub u16);
 
 /// A byte offset within a single 64KiB memory block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BlockOffset(u16);
+pub struct BlockOffset(pub u16);
 
 impl ByteAddress {
     pub const ZERO: ByteAddress = ByteAddress(0);
@@ -513,6 +513,10 @@ impl ByteAddress {
         let aligned = self.0 & 0xFFFF0000;
         aligned.checked_add(BLOCK_SIZE as u32).map(ByteAddress)
     }
+
+    pub fn from_block_index(idx: BlockIndex) -> ByteAddress {
+        ByteAddress((idx.0 << 16) as u32)
+    }
 }
 
 impl ByteOffset {
@@ -524,6 +528,12 @@ impl ByteOffset {
 impl WordOffset {
     pub fn from_immediate(immediate: u16) -> WordOffset {
         WordOffset(immediate as i16 as i32)
+    }
+}
+
+impl BlockIndex {
+    pub fn to_byte_addr(self) -> ByteAddress {
+        ByteAddress::from_block_index(self)
     }
 }
 
@@ -656,28 +666,30 @@ impl Machine {
 
     pub fn from_instructions(instructions: &[Instruction]) -> Machine {
         let mut m = Machine::new();
-        let mut addr = ByteAddress::ZERO;
-        for i in instructions {
-            m.write_word(addr, i.encode());
-            addr = addr.next_word().0;
-        }
-
+        m.override_with_instructions(instructions);
         m
     }
 
-    pub fn with_controller(
-        mut self,
+    pub fn override_with_instructions(&mut self, instructions: &[Instruction]) {
+        let mut addr = ByteAddress::ZERO;
+        for i in instructions {
+            self.write_word(addr, i.encode());
+            addr = addr.next_word().0;
+        }
+    }
+
+    pub fn attach_controller(
+        &mut self,
         con: impl IoController + 'static,
-    ) -> Result<Machine, ControllerAttachError> {
+    ) -> Option<BlockIndex> {
         let mut addr = ByteAddress(IO_BEGINNING);
         loop {
             if matches!(self.block_from_addr(addr).0, Block::Empty) {
                 *self.block_from_addr_mut(addr).0 = Block::with_controller(con);
-                return Ok(self);
+                let (block_index, _) = addr.into_block_parts();
+                return Some(block_index);
             }
-            addr = addr
-                .next_block()
-                .ok_or(ControllerAttachError::NoEmptyIoBlock)?;
+            addr = addr.next_block()?;
         }
     }
 

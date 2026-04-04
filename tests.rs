@@ -313,13 +313,15 @@ fn reset_preserves_io_controllers() {
     let (controller, state) = new_test_controller();
     state.bytes.borrow_mut()[0] = 0xAB;
 
-    let mut m = Machine::new().with_controller(controller).unwrap();
+    let mut m = Machine::new();
+    let idx = m.attach_controller(controller).unwrap();
+    let addr = idx.to_byte_addr();
     m.write_byte(ByteAddress(0x100), 0xCD);
 
     m.reset();
 
-    assert!(m.is_io_at_addr(ByteAddress(IO_BEGINNING)));
-    assert_eq!(m.read_byte(ByteAddress(IO_BEGINNING)), 0xAB);
+    assert!(m.is_io_at_addr(addr));
+    assert_eq!(m.read_byte(addr), 0xAB);
     assert_eq!(m.read_byte(ByteAddress(0x100)), 0);
 }
 
@@ -329,11 +331,12 @@ fn with_controller_skips_non_empty_io_window_blocks() {
     let mut m = Machine::new();
     m.write_byte(ByteAddress(IO_BEGINNING), 0xAA);
 
-    let m = m.with_controller(controller).unwrap();
+    let idx = m.attach_controller(controller).unwrap();
+    let addr = idx.to_byte_addr();
 
-    assert!(!m.is_io_at_addr(ByteAddress(IO_BEGINNING)));
-    assert_eq!(m.read_byte(ByteAddress(IO_BEGINNING)), 0xAA);
-    assert!(m.is_io_at_addr(ByteAddress(IO_BEGINNING + BLOCK_SIZE as u32)));
+    assert!(!m.is_io_at_addr(addr));
+    assert_eq!(m.read_byte(addr), 0xAA);
+    assert!(m.is_io_at_addr(addr.next_block().unwrap()));
 }
 
 #[test]
@@ -345,9 +348,9 @@ fn with_controller_returns_error_when_no_io_slots_remain() {
     }
 
     let (controller, _) = new_test_controller();
-    match m.with_controller(controller) {
-        Ok(_) => panic!("expected controller attachment to fail"),
-        Err(err) => assert_eq!(err, ControllerAttachError::NoEmptyIoBlock),
+    match m.attach_controller(controller) {
+        Some(_) => panic!("expected controller attachment to fail"),
+        None => {},
     }
 }
 
@@ -359,11 +362,13 @@ fn word_load_spanning_ram_and_io_ticks_the_io_controller() {
     state.bytes.borrow_mut()[1] = 0xCC;
     state.bytes.borrow_mut()[2] = 0xDD;
 
-    let mut m = Machine::from_instructions(instructions.as_slice())
-        .with_controller(controller)
-        .unwrap();
-    m.write_byte(ByteAddress(IO_BEGINNING - 1), 0xAA);
-    m.set_reg(2, IO_BEGINNING - 1);
+    let mut m = Machine::from_instructions(instructions.as_slice());
+    let idx = m.attach_controller(controller) .unwrap();
+    let addr = idx.to_byte_addr();
+
+    let addr_minus_1 = addr.overflowing_add_bytes(ByteOffset(-1)).0;
+    m.write_byte(addr_minus_1, 0xAA);
+    m.set_reg(2, addr_minus_1.0);
 
     m.exec_while_not_halt().unwrap();
 
@@ -381,11 +386,9 @@ fn word_load_spanning_two_io_blocks_ticks_both_controllers() {
     state_b.bytes.borrow_mut()[1] = 0x33;
     state_b.bytes.borrow_mut()[2] = 0x44;
 
-    let mut m = Machine::from_instructions(instructions.as_slice())
-        .with_controller(controller_a)
-        .unwrap()
-        .with_controller(controller_b)
-        .unwrap();
+    let mut m = Machine::from_instructions(instructions.as_slice());
+    let idx_a = m.attach_controller(controller_a).unwrap();
+    let idx_b = m.attach_controller(controller_b).unwrap();
     m.set_reg(2, IO_BEGINNING + BLOCK_SIZE as u32 - 1);
 
     m.exec_while_not_halt().unwrap();
