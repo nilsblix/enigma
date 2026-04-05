@@ -1,7 +1,4 @@
-#![no_std]
-
-extern crate alloc;
-use alloc::{boxed::Box, collections::btree_map::BTreeMap};
+use std::collections::BTreeMap;
 
 pub mod is;
 use is::{Instruction, InstructionError, Op, Payload};
@@ -543,6 +540,11 @@ impl Machine {
                 } else {
                     0
                 }
+            }
+            Op::Debu => {
+                let r_r = self.read_register(rr);
+                println!("DEBUG: r{rr} = {r_r}");
+                r_r
             }
             _ => panic!("invalid R-type opcode: {}", op.name()),
         };

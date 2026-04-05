@@ -15,6 +15,7 @@ pub enum Op {
     Xor   = 0x07,
     Slt   = 0x08,
     Sltu  = 0x09,
+    Debu  = 0x1F,
     ///////////////////////////////////////////////////////////////////////////
     // I types
     ///////////////////////////////////////////////////////////////////////////
@@ -68,6 +69,7 @@ impl Op {
             Op::Xor   => "xor",
             Op::Slt   => "slt",
             Op::Sltu  => "sltu",
+            Op::Debu   => "deb",
             ////////////////////////////////////////////////////////////////////
             // I types
             ////////////////////////////////////////////////////////////////////
@@ -128,6 +130,7 @@ impl TryFrom<u8> for Op {
             0x07 => Ok(Op::Xor),
             0x08 => Ok(Op::Slt),
             0x09 => Ok(Op::Sltu),
+            0x1F => Ok(Op::Debu),
             // Is
             0x21 => Ok(Op::Addi),
             0x22 => Ok(Op::Subi),
@@ -336,6 +339,10 @@ impl Instruction {
 
     pub fn sltu(rr: usize, ra: usize, rb: usize) -> Instruction {
         Instruction::r_type(Op::Sltu, rr, ra, rb)
+    }
+
+    pub fn debu(rr: usize) -> Instruction {
+        Instruction::r_type(Op::Debu, rr, 0, 0)
     }
 
     pub fn addi(rr: usize, ra: usize, imm: u16) -> Instruction {

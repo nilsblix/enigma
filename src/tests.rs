@@ -2,8 +2,8 @@
 extern crate std;
 
 use super::*;
-use alloc::rc::Rc;
-use core::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::cell::{Cell, RefCell};
 
 #[test]
 fn encode_and_decode_instruction() {
