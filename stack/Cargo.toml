@@ -1,0 +1,11 @@
+[package]
+name = "stack"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+enigma = { path = ".." }
+
+[[bin]]
+name = "stack"
+path = "stack.rs"
