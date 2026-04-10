@@ -1,9 +1,10 @@
 #[cfg(test)]
 extern crate std;
-
-use super::*;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
+
+use super::*;
+use super::is::Payload;
 
 #[test]
 fn encode_and_decode_instruction() {
