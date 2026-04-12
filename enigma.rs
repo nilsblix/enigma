@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 pub mod is {
-#[rustfmt::skip]
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[rustfmt::skip]
+    #[repr(u8)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Op {
         Noop  = 0x00,
         ///////////////////////////////////////////////////////////////////////////
@@ -48,7 +48,7 @@ pub mod is {
         Bne   = 0x3C,
     }
 
-#[derive(PartialEq)]
+    #[derive(PartialEq)]
     pub enum Encoding {
         Noop,
         R,
@@ -183,7 +183,7 @@ pub mod is {
         }
     }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Payload {
         Noop,
         R {
@@ -212,7 +212,7 @@ pub mod is {
         }
     }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Instruction {
         pub op: Op,
         pub payload: Payload,
@@ -222,7 +222,7 @@ pub mod is {
     pub const OPCODE_MASK: u32 = 0b111111;
     pub const IMMEDIATE_MASK: u32 = 0xFFFF;
 
-#[derive(Debug)]
+    #[derive(Debug)]
     pub enum InstructionError {
         InvalidOperation { opcode: u8 },
     }
@@ -267,7 +267,8 @@ pub mod is {
         /// ```
         pub fn decode(word: u32) -> Result<Instruction, InstructionError> {
             let opcode = ((word >> Instruction::OPCODE_OFFSET) & OPCODE_MASK) as u8;
-            let op = Op::try_from(opcode).map_err(|_| InstructionError::InvalidOperation { opcode })?;
+            let op =
+                Op::try_from(opcode).map_err(|_| InstructionError::InvalidOperation { opcode })?;
             let payload = match op.encoding() {
                 Encoding::Noop => Payload::Noop,
                 Encoding::R => {
