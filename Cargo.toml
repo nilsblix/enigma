@@ -6,4 +6,9 @@ edition = "2024"
 [dependencies]
 
 [lib]
-path = "enigma.rs"
+path = "libenigma.rs"
+name = "enigma"
+
+[[bin]]
+name = "enigmaforth"
+path = "enigmaforth.rs"
