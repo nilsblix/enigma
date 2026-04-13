@@ -742,6 +742,13 @@ impl Memory {
         }
     }
 
+    pub fn read_raw_bytes(&self, addr: ByteAddress, buf: &mut [u8]) {
+        for i in 0..buf.len() {
+            let (offset_addr, _) = addr.overflowing_add_bytes(ByteOffset(i as i32));
+            buf[i] = self.read_raw_byte(offset_addr);
+        }
+    }
+
     pub fn read_raw_half_word(&self, addr: ByteAddress) -> u16 {
         let (next_addr, _) = addr.overflowing_add_bytes(ByteOffset(1));
         let bytes = [self.read_raw_byte(addr), self.read_raw_byte(next_addr)];
@@ -749,15 +756,8 @@ impl Memory {
     }
 
     pub fn read_raw_word(&self, addr: ByteAddress) -> u32 {
-        let (addr_1, _) = addr.overflowing_add_bytes(ByteOffset(1));
-        let (addr_2, _) = addr.overflowing_add_bytes(ByteOffset(2));
-        let (addr_3, _) = addr.overflowing_add_bytes(ByteOffset(3));
-        let bytes = [
-            self.read_raw_byte(addr),
-            self.read_raw_byte(addr_1),
-            self.read_raw_byte(addr_2),
-            self.read_raw_byte(addr_3),
-        ];
+        let mut bytes = [0u8; 4];
+        self.read_raw_bytes(addr, &mut bytes);
         u32::from_be_bytes(bytes)
     }
 
@@ -772,17 +772,16 @@ impl Memory {
         io.read(self, addr, width)
     }
 
-    pub fn read_raw_bytes(&self, ptr: ByteAddress, buf: &mut [u8]) {
-        for i in 0..buf.len() {
-            let (addr, _) = ptr.overflowing_add_bytes(ByteOffset(i as i32));
-            buf[i] = self.read_raw_byte(addr);
-        }
-    }
-
     pub fn write_raw_byte(&mut self, addr: ByteAddress, data: u8) {
         let (block, offset) = self.block_from_addr_mut(addr);
         match block {
             Block::Empty => {
+                // We don't need to allocate if we write 0, due to
+                // `Memory::read_raw_byte` on an empty block always returning 0.
+                if data == 0 {
+                    return;
+                }
+
                 *block = Block::with_empty_data();
                 self.write_raw_byte(addr, data);
             }
