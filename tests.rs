@@ -1,5 +1,4 @@
 #[cfg(test)]
-extern crate std;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -323,13 +322,49 @@ fn new_test_controller() -> (TestController, Rc<TestControllerState>) {
     )
 }
 
+struct TestSystemCallState {
+    invocations: Cell<u32>,
+    observed_arg: Cell<u32>,
+}
+
+struct TestSystemCall {
+    state: Rc<TestSystemCallState>,
+}
+
+impl SystemCall for TestSystemCall {
+    fn invoke(&mut self, mem: &mut Memory, regs: &mut Registers) {
+        self.state.invocations.set(self.state.invocations.get() + 1);
+
+        let ptr = ByteAddress(regs.read(2));
+        let word = mem.read_raw_word(ptr);
+        self.state.observed_arg.set(word);
+
+        regs.write(0, u32::MAX);
+        regs.write(1, 0);
+        regs.write(4, word);
+    }
+}
+
+fn new_test_system_call() -> (TestSystemCall, Rc<TestSystemCallState>) {
+    let state = Rc::new(TestSystemCallState {
+        invocations: Cell::new(0),
+        observed_arg: Cell::new(0),
+    });
+    (
+        TestSystemCall {
+            state: Rc::clone(&state),
+        },
+        state,
+    )
+}
+
 #[test]
 fn with_controller_skips_non_empty_io_window_blocks() {
     let (controller, _) = new_test_controller();
     let mut m = Machine::new();
     m.write_byte(ByteAddress(IO_BEGINNING), 0xAA);
 
-    let addr = m.attach_io_controller(controller).unwrap();
+    let addr = m.attach_io_controller(None, controller).unwrap();
 
     assert!(!matches!(
         m.mem.block_from_addr(ByteAddress(IO_BEGINNING)).0,
@@ -348,10 +383,65 @@ fn with_controller_returns_error_when_no_io_slots_remain() {
     }
 
     let (controller, _) = new_test_controller();
-    match m.attach_io_controller(controller) {
+    match m.attach_io_controller(None, controller) {
         Some(_) => panic!("expected controller attachment to fail"),
         None => {}
     }
+}
+
+#[test]
+fn with_controller_uses_desired_address() {
+    let (controller, _) = new_test_controller();
+    let mut m = Machine::new();
+    let desired_addr = ByteAddress(IO_BEGINNING + 2 * BLOCK_SIZE as u32);
+
+    let addr = m
+        .attach_io_controller(Some(desired_addr), controller)
+        .unwrap();
+
+    assert_eq!(addr, desired_addr);
+    assert!(matches!(m.mem.block_from_addr(desired_addr).0, Block::Io));
+}
+
+#[test]
+fn attach_system_call_rejects_duplicate_number() {
+    let (system_call_a, _) = new_test_system_call();
+    let (system_call_b, _) = new_test_system_call();
+    let mut m = Machine::new();
+
+    assert_eq!(m.attach_system_call(7, system_call_a), Some(7));
+    assert_eq!(m.attach_system_call(7, system_call_b), None);
+}
+
+#[test]
+fn system_call_dispatches_and_preserves_r0() {
+    let instructions = [Instruction::sys(), Instruction::HALT];
+    let (system_call, state) = new_test_system_call();
+    let mut m = Machine::from_instructions(instructions.as_slice());
+
+    assert_eq!(m.attach_system_call(7, system_call), Some(7));
+    m.write_word(ByteAddress(0x2_0000), 0x1234_5678);
+    m.write_register(1, 7);
+    m.write_register(2, 0x2_0000);
+
+    m.exec_while_not_halt().unwrap();
+
+    assert_eq!(state.invocations.get(), 1);
+    assert_eq!(state.observed_arg.get(), 0x1234_5678);
+    assert_eq!(m.read_register(0), 0);
+    assert_eq!(m.read_register(1), 0);
+    assert_eq!(m.read_register(4), 0x1234_5678);
+}
+
+#[test]
+fn unknown_system_call_sets_error_code() {
+    let instructions = [Instruction::sys(), Instruction::HALT];
+    let mut m = Machine::from_instructions(instructions.as_slice());
+    m.write_register(1, 99);
+
+    m.exec_while_not_halt().unwrap();
+
+    assert_eq!(m.read_register(1), 1);
 }
 
 #[test]
@@ -364,7 +454,7 @@ fn word_load_spanning_ram_and_io_panics() {
     state.bytes.borrow_mut()[2] = 0xDD;
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    let addr = m.attach_io_controller(controller).unwrap();
+    let addr = m.attach_io_controller(None, controller).unwrap();
 
     let addr_minus_1 = addr.overflowing_add_bytes(ByteOffset(-1)).0;
     m.write_byte(addr_minus_1, 0xAA);
@@ -386,8 +476,8 @@ fn word_load_spanning_two_io_blocks_panics() {
     state_b.bytes.borrow_mut()[2] = 0x44;
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    let addr_a = m.attach_io_controller(controller_a).unwrap();
-    let addr_b = m.attach_io_controller(controller_b).unwrap();
+    let addr_a = m.attach_io_controller(None, controller_a).unwrap();
+    let addr_b = m.attach_io_controller(None, controller_b).unwrap();
     m.write_register(2, addr_a.0 + BLOCK_SIZE as u32 - 1);
 
     m.exec_while_not_halt().unwrap();
@@ -404,7 +494,7 @@ fn word_load_within_single_io_block_uses_single_read() {
     state.bytes.borrow_mut()[3] = 0x44;
 
     let mut m = Machine::from_instructions(instructions.as_slice());
-    let addr = m.attach_io_controller(controller).unwrap();
+    let addr = m.attach_io_controller(None, controller).unwrap();
     m.write_register(2, addr.0);
 
     m.exec_while_not_halt().unwrap();

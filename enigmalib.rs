@@ -22,6 +22,7 @@ pub mod is {
         ///////////////////////////////////////////////////////////////////////////
         // I types
         ///////////////////////////////////////////////////////////////////////////
+        Sys   = 0x20,
         Addi  = 0x21,
         Subi  = 0x22,
         Shli  = 0x23,
@@ -76,6 +77,7 @@ pub mod is {
                 ////////////////////////////////////////////////////////////////////
                 // I types
                 ////////////////////////////////////////////////////////////////////
+                Op::Sys   => "sys",
                 Op::Addi  => "add_i",
                 Op::Subi  => "sub_i",
                 Op::Shli  => "shl_i",
@@ -135,6 +137,7 @@ pub mod is {
                 0x09 => Ok(Op::Sltu),
                 0x1F => Ok(Op::Debu),
                 // Is
+                0x20 => Ok(Op::Sys),
                 0x21 => Ok(Op::Addi),
                 0x22 => Ok(Op::Subi),
                 0x23 => Ok(Op::Shli),
@@ -353,6 +356,10 @@ pub mod is {
             Instruction::i_type(Op::Addi, rr, ra, imm)
         }
 
+        pub fn sys() -> Instruction {
+            Instruction::i_type(Op::Sys, 0, 0, 0)
+        }
+
         pub fn subi(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Subi, rr, ra, imm)
         }
@@ -449,6 +456,35 @@ pub mod is {
 
 use is::{Instruction, InstructionError, Op};
 
+pub const BLOCK_SIZE: usize = 1 << 16;
+pub const BLOCK_COUNT: usize = 1 << 16;
+pub const REGISTER_COUNT: usize = 32;
+pub const WORD_SIZE_BYTES: u32 = 4;
+
+pub struct Registers {
+    words: [u32; REGISTER_COUNT],
+}
+
+impl Registers {
+    pub fn new() -> Registers {
+        Registers {
+            words: [0u32; REGISTER_COUNT],
+        }
+    }
+
+    pub fn read(&self, index: usize) -> u32 {
+        self.words[index % REGISTER_COUNT]
+    }
+
+    pub fn write(&mut self, index: usize, word: u32) {
+        let index = index % REGISTER_COUNT;
+        if index == 0 {
+            return;
+        }
+        self.words[index] = word;
+    }
+}
+
 pub trait IoController {
     /// Some io relies on writing on read, which justifies the mutable read.
     /// Read supports all 3 main reads, i.e: byte, halfword and word. We always
@@ -460,10 +496,9 @@ pub trait IoController {
     fn write(&mut self, mem: &mut Memory, addr: ByteAddress, width: Width, data: u32);
 }
 
-pub const BLOCK_SIZE: usize = 1 << 16;
-pub const BLOCK_COUNT: usize = 1 << 16;
-pub const REGISTER_COUNT: usize = 32;
-pub const WORD_SIZE_BYTES: u32 = 4;
+pub trait SystemCall {
+    fn invoke(&mut self, mem: &mut Memory, regs: &mut Registers);
+}
 
 /// A block of byte-addressed contiguous virtual machine memory.
 ///
@@ -601,11 +636,12 @@ pub struct Memory {
     blocks: Box<[Block; BLOCK_COUNT]>,
 }
 
+#[rustfmt::skip]
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Width {
-    Byte = 1,
+    Byte     = 1,
     Halfword = 2,
-    Word = 4,
+    Word     = 4,
 }
 
 impl Memory {
@@ -739,11 +775,12 @@ pub const SP_INDEX: usize = REGISTER_COUNT - 1;
 
 pub struct Machine {
     program_counter: ByteAddress,
-    regs: [u32; REGISTER_COUNT],
+    regs: Registers,
     mem: Memory,
     /// Each io gets mapped to the range between a base address + 2^16 bytes,
     /// i.e some BlockIndex.
     ios: BTreeMap<BlockIndex, Box<dyn IoController>>,
+    sys: BTreeMap<u32, Box<dyn SystemCall>>,
 }
 
 /// The side effects of the VM successfully executing a single instruction.
@@ -765,11 +802,12 @@ impl Machine {
     pub fn new() -> Machine {
         let mut m = Machine {
             program_counter: ByteAddress::ZERO,
-            regs: [0u32; REGISTER_COUNT],
+            regs: Registers::new(),
             mem: Memory::new(),
             ios: BTreeMap::new(),
+            sys: BTreeMap::new(),
         };
-        m.regs[SP_INDEX] = STACK_BEGINNING;
+        m.regs.write(SP_INDEX, STACK_BEGINNING);
         m
     }
 
@@ -787,19 +825,54 @@ impl Machine {
         }
     }
 
-    pub fn attach_io_controller(&mut self, io: impl IoController + 'static) -> Option<ByteAddress> {
+    fn attach_io_controller_at(
+        &mut self,
+        addr: ByteAddress,
+        io: Box<dyn IoController>,
+    ) -> Option<ByteAddress> {
+        let (block_index, _) = addr.into_block_parts();
+        if !matches!(self.mem.block(block_index), Block::Empty) {
+            return None;
+        }
+
+        *self.mem.block_mut(block_index) = Block::with_io();
+        self.ios.insert(block_index, io);
+        Some(block_index.to_byte_addr())
+    }
+
+    pub fn attach_io_controller(
+        &mut self,
+        desired_address: Option<ByteAddress>,
+        io: impl IoController + 'static,
+    ) -> Option<ByteAddress> {
+        let mut io = Some(Box::new(io) as Box<dyn IoController>);
+
+        if let Some(addr) = desired_address {
+            return self.attach_io_controller_at(addr, io.take().unwrap());
+        }
+
         let mut addr = ByteAddress(IO_BEGINNING);
         loop {
             if matches!(self.mem.block_from_addr(addr).0, Block::Empty) {
-                let (block_index, _) = addr.into_block_parts();
-                *self.mem.block_from_addr_mut(addr).0 = Block::with_io();
-                self.ios.insert(block_index, Box::new(io));
-                return Some(addr);
+                return self.attach_io_controller_at(addr, io.take().unwrap());
             }
 
             // This breaks out when no next block exists.
             addr = addr.next_block()?;
         }
+    }
+
+    pub fn attach_system_call(
+        &mut self,
+        desired_call_number: u32,
+        system_call: impl SystemCall + 'static,
+    ) -> Option<u32> {
+        if self.sys.contains_key(&desired_call_number) {
+            return None;
+        }
+
+        self.sys.insert(desired_call_number, Box::new(system_call));
+        Some(desired_call_number)
     }
 
     pub fn detach_io_controller(&mut self, block_idx: BlockIndex) -> Option<()> {
@@ -809,15 +882,11 @@ impl Machine {
     }
 
     pub fn read_register(&self, index: usize) -> u32 {
-        self.regs[index % REGISTER_COUNT]
+        self.regs.read(index)
     }
 
     pub fn write_register(&mut self, index: usize, word: u32) {
-        let index = index % REGISTER_COUNT;
-        if index == 0 {
-            return;
-        }
-        self.regs[index] = word;
+        self.regs.write(index, word);
     }
 
     pub fn set_program_counter(&mut self, addr: ByteAddress) {
@@ -1005,6 +1074,19 @@ impl Machine {
         let mut jumped = false;
 
         let result = match op {
+            Op::Sys => {
+                // r1 is the syscall number.
+                let nr = self.read_register(1);
+                if let Some(system_call) = self.sys.get_mut(&nr) {
+                    system_call.invoke(&mut self.mem, &mut self.regs);
+                } else {
+                    // We return non-zero on error. In this case, 1 signifies
+                    // unknown system call number.
+                    self.write_register(1, 1);
+                }
+
+                None
+            }
             Op::Addi => Some(r_a.wrapping_add(imm as u32)),
             Op::Subi => Some(r_a.wrapping_sub(imm as u32)),
             Op::Shli => Some(r_a << (imm & Self::SHIFT_MASK as u16)),
