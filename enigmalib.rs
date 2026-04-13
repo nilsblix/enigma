@@ -268,6 +268,9 @@ pub mod is {
         /// +------------------------------------+
         ///  opcode  rr    ra       immediate
         /// ```
+        ///
+        /// Some instructions, like [`Op::Debu`] or [`Op::Sys`] ignore some of
+        /// their data, which means that the data acts like bit-padding.
         pub fn decode(word: u32) -> Result<Instruction, InstructionError> {
             let opcode = ((word >> Instruction::OPCODE_OFFSET) & OPCODE_MASK) as u8;
             let op =
@@ -308,146 +311,182 @@ pub mod is {
             Instruction { op, payload }
         }
 
+        /// The Noop instruction, which gets ignored by the machine.
         pub fn noop() -> Instruction {
             Instruction::NOOP
         }
 
+        /// Set rr to be the result of ra + rb.
         pub fn add(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Add, rr, ra, rb)
         }
 
+        /// Set rr to be the result of ra - rb.
         pub fn sub(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Sub, rr, ra, rb)
         }
 
+        /// Set rr to be the result of ra << rb.
         pub fn shl(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Shl, rr, ra, rb)
         }
 
+        /// Set rr to be the result of ra >> rb.
         pub fn shr(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Shr, rr, ra, rb)
         }
 
+        /// Set rr to be the result of ra | rb (bitwise or).
         pub fn or(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Or, rr, ra, rb)
         }
 
+        /// Set rr to be the result of ra & rb (bitwise and).
         pub fn and(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::And, rr, ra, rb)
         }
 
+        /// Set rr to be the result of ra ^ rb (bitwise xor).
         pub fn xor(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Xor, rr, ra, rb)
         }
 
+        /// Set rr to 1 if ra < rb, interpreting both as signed integers.
         pub fn slt(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Slt, rr, ra, rb)
         }
 
+        /// Set rr to 1 if ra < rb, interpreting both as unsigned integers.
         pub fn sltu(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Sltu, rr, ra, rb)
         }
 
+        /// Print the contents of rr for debugging.
         pub fn debu(rr: usize) -> Instruction {
             Instruction::r_type(Op::Debu, rr, 0, 0)
         }
 
-        pub fn addi(rr: usize, ra: usize, imm: u16) -> Instruction {
-            Instruction::i_type(Op::Addi, rr, ra, imm)
-        }
-
+        /// Invoke the system call whose number is stored in r1.
         pub fn sys() -> Instruction {
             Instruction::i_type(Op::Sys, 0, 0, 0)
         }
 
+        /// Set rr to be the result of ra + imm.
+        pub fn addi(rr: usize, ra: usize, imm: u16) -> Instruction {
+            Instruction::i_type(Op::Addi, rr, ra, imm)
+        }
+
+        /// Set rr to be the result of ra - imm.
         pub fn subi(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Subi, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra << imm.
         pub fn shli(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Shli, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra >> imm.
         pub fn shri(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Shri, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra | imm (bitwise or).
         pub fn ori(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Ori, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra | (imm << 16) (bitwise or).
         pub fn orui(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Orui, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra & sign_extend(imm) (bitwise and).
         pub fn andi(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Andi, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra & ((imm << 16) | 0x0000FFFF).
         pub fn andui(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Andui, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra ^ imm (bitwise xor).
         pub fn xori(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Xori, rr, ra, imm)
         }
 
+        /// Set rr to be the result of ra ^ (imm << 16) (bitwise xor).
         pub fn xorui(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Xorui, rr, ra, imm)
         }
 
+        /// Set rr to 1 if ra < imm, interpreting both as signed integers.
         pub fn slti(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Slti, rr, ra, imm)
         }
 
+        /// Set rr to 1 if ra < imm, interpreting both as unsigned integers.
         pub fn sltui(rr: usize, ra: usize, imm: u16) -> Instruction {
             Instruction::i_type(Op::Sltui, rr, ra, imm)
         }
 
+        /// Load a word from memory at ra + imm into rr.
         pub fn ldw(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Ldw, rr, ra, imm as u16)
         }
 
+        /// Load a signed halfword from memory at ra + imm into rr.
         pub fn ldhw(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Ldhw, rr, ra, imm as u16)
         }
 
+        /// Load an unsigned halfword from memory at ra + imm into rr.
         pub fn ldhwu(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Ldhwu, rr, ra, imm as u16)
         }
 
+        /// Load a signed byte from memory at ra + imm into rr.
         pub fn ldb(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Ldb, rr, ra, imm as u16)
         }
 
+        /// Load an unsigned byte from memory at ra + imm into rr.
         pub fn ldbu(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Ldbu, rr, ra, imm as u16)
         }
 
+        /// Store rr as a word to memory at ra + imm.
         pub fn stw(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Stw, rr, ra, imm as u16)
         }
 
+        /// Store rr as a halfword to memory at ra + imm.
         pub fn sthw(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Sthw, rr, ra, imm as u16)
         }
 
+        /// Store rr as a byte to memory at ra + imm.
         pub fn stb(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Stb, rr, ra, imm as u16)
         }
 
+        /// Jump by imm words and write the return address to rr.
         pub fn jmp(rr: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Jmp, rr, 0, imm as u16)
         }
 
+        /// Jump to ra + imm words and write the return address to rr.
         pub fn jmpr(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Jmpr, rr, ra, imm as u16)
         }
 
+        /// Branch by imm words if rr == ra.
         pub fn beq(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Beq, rr, ra, imm as u16)
         }
 
+        /// Branch by imm words if rr != ra.
         pub fn bne(rr: usize, ra: usize, imm: i16) -> Instruction {
             Instruction::i_type(Op::Bne, rr, ra, imm as u16)
         }
@@ -461,6 +500,13 @@ pub const BLOCK_COUNT: usize = 1 << 16;
 pub const REGISTER_COUNT: usize = 32;
 pub const WORD_SIZE_BYTES: u32 = 4;
 
+/// Register purposes:
+///
+/// * r0 is read/write 0.
+/// * r31 is initialized to be the stack pointer.
+///
+/// All other registers are general purpose registers, and can be used without
+/// cleanup.
 pub struct Registers {
     words: [u32; REGISTER_COUNT],
 }
@@ -497,6 +543,15 @@ pub trait IoController {
 }
 
 pub trait SystemCall {
+    /// Invoke a system call. Below are the general guidelines to follow when
+    /// writing system calls:
+    ///
+    /// * r1 is the syscall number to invoke.
+    /// * r1 is also the return value, which is non-zero on error. A return
+    /// value of 1 is reserved for unknown syscall nr.
+    /// * r2..r7 are the arguments, generally try to keep number of arguments
+    /// less than or equal to 6.
+    /// * r2 can also be used as a secondary return or errno/status.
     fn invoke(&mut self, mem: &mut Memory, regs: &mut Registers);
 }
 
