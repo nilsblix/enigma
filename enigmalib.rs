@@ -21,6 +21,7 @@ pub mod is {
         Xor   = 0x07,
         Slt   = 0x08,
         Sltu  = 0x09,
+        Eql   = 0x10,
         Debu  = 0x1F,
         ///////////////////////////////////////////////////////////////////////////
         // I types
@@ -76,7 +77,8 @@ pub mod is {
                 Op::Xor   => "xor",
                 Op::Slt   => "slt",
                 Op::Sltu  => "sltu",
-                Op::Debu   => "deb",
+                Op::Eql   => "eql",
+                Op::Debu  => "deb",
                 ////////////////////////////////////////////////////////////////////
                 // I types
                 ////////////////////////////////////////////////////////////////////
@@ -138,6 +140,7 @@ pub mod is {
                 0x07 => Ok(Op::Xor),
                 0x08 => Ok(Op::Slt),
                 0x09 => Ok(Op::Sltu),
+                0x10 => Ok(Op::Eql),
                 0x1F => Ok(Op::Debu),
                 // Is
                 0x20 => Ok(Op::Sys),
@@ -362,6 +365,11 @@ pub mod is {
         /// Set rr to 1 if ra < rb, interpreting both as unsigned integers.
         pub fn sltu(rr: usize, ra: usize, rb: usize) -> Instruction {
             Instruction::r_type(Op::Sltu, rr, ra, rb)
+        }
+
+        /// Set rr to 1 if ra == rb, and 0 otherwise.
+        pub fn eql(rr: usize, ra: usize, rb: usize) -> Instruction {
+            Instruction::r_type(Op::Eql, rr, ra, rb)
         }
 
         /// Print the contents of rr for debugging.
@@ -1141,6 +1149,13 @@ impl Machine {
             }
             Op::Sltu => {
                 if r_a < r_b {
+                    1
+                } else {
+                    0
+                }
+            }
+            Op::Eql => {
+                if r_a == r_b {
                     1
                 } else {
                     0
