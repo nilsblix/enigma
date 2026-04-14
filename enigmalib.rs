@@ -790,6 +790,13 @@ impl Memory {
         }
     }
 
+    pub fn write_raw_bytes(&mut self, addr: ByteAddress, bytes: &[u8]) {
+        for (i, &byte) in bytes.iter().enumerate() {
+            let (offset_addr, _) = addr.overflowing_add_bytes(ByteOffset(i as i32));
+            self.write_raw_byte(offset_addr, byte);
+        }
+    }
+
     pub fn write_raw_half_word(&mut self, addr: ByteAddress, data: u16) {
         let (next_addr, _) = addr.overflowing_add_bytes(ByteOffset(1));
         let bytes = data.to_be_bytes();
@@ -1059,6 +1066,16 @@ impl Machine {
         match self.io_block_index_in_span(addr, 4) {
             Some(_) => self.write_io(addr, Width::Word, data as u32),
             None => self.mem.write_raw_word(addr, data),
+        }
+    }
+
+    pub fn write_bytes(&mut self, addr: ByteAddress, bytes: &[u8]) {
+        // FIXME: is there a way to make this more efficient, i.e not write
+        // every single byte sequentially? this applies to
+        // Memory::read/write_raw_bytes as well.
+        for (i, &byte) in bytes.iter().enumerate() {
+            let (offset_addr, _) = addr.overflowing_add_bytes(ByteOffset(i as i32));
+            self.write_byte(offset_addr, byte);
         }
     }
 

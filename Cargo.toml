@@ -10,5 +10,9 @@ path = "enigmalib.rs"
 name = "enigma"
 
 [[bin]]
+name = "enigmavm"
+path = "enigmavm.rs"
+
+[[bin]]
 name = "enigmaforth"
 path = "enigmaforth.rs"
