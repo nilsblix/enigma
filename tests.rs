@@ -238,6 +238,55 @@ fn word_access_crosses_ram_block_boundaries() {
 }
 
 #[test]
+fn builder_chunk_round_trip_preserves_sparse_memory() {
+    let hello_addr = ByteAddress(0x0000_F000);
+    let hello = b"Hello, Sailor!\n";
+    let instructions = [
+        Instruction::xori(1, 0, 1),
+        Instruction::xori(2, 0, 1),
+        Instruction::xori(3, 0, hello_addr.0 as u16),
+        Instruction::xori(4, 0, hello.len() as u16),
+        Instruction::sys(),
+        Instruction::HALT,
+    ];
+
+    let mut builder = Builder::new();
+    builder.override_with_instructions(instructions.as_slice());
+    builder.write_bytes(hello_addr, hello);
+
+    let mut chunk_bytes = Vec::new();
+    builder.dump_chunks(&mut chunk_bytes).unwrap();
+    assert!(chunk_bytes.len() < hello_addr.0 as usize);
+
+    let rebuilt = Builder::from_chunk_bytes(chunk_bytes.as_slice()).unwrap();
+    let mut machine = rebuilt.branch_to_machine();
+
+    assert_eq!(
+        machine.read_word(ByteAddress::ZERO),
+        instructions[0].encode()
+    );
+    assert_eq!(machine.read_word(ByteAddress(4)), instructions[1].encode());
+    let mut loaded_hello = [0u8; 15];
+    machine.mem.read_raw_bytes(hello_addr, &mut loaded_hello);
+    assert_eq!(loaded_hello, *hello);
+}
+
+#[test]
+fn builder_copy_into_machine_keeps_original_memory() {
+    let addr = ByteAddress(0x0000_2000);
+    let mut builder = Builder::new();
+    builder.write_word(addr, 0x1234_5678);
+
+    let mut machine_a = builder.branch_to_machine();
+    machine_a.write_word(addr, 0xAABB_CCDD);
+
+    let mut machine_b = builder.branch_to_machine();
+
+    assert_eq!(machine_a.read_word(addr), 0xAABB_CCDD);
+    assert_eq!(machine_b.read_word(addr), 0x1234_5678);
+}
+
+#[test]
 fn program_fibonacci() {
     let instructions = &[
         /* 0 */ Instruction::addi(1, 0, 0), // r1 = 0

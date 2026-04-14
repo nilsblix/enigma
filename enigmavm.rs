@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use enigma::{is, ByteAddress, Machine, Memory, Registers, SystemCall};
+use enigma::{Builder, ByteAddress, Machine, Memory, Registers, SystemCall, is};
 use std::{
     fs::File,
     io::{self, Read},
@@ -61,16 +61,15 @@ const STDIN_FD: u16 = 0;
 const STDOUT_FD: u16 = 1;
 const STDERR_FD: u16 = 2;
 
-fn machine_with_os() -> Machine {
-    let mut m = Machine::new();
+fn attach_os_to_machine(m: &mut Machine) {
     _ = m.attach_system_call(SYSCALL_READ_FROM_FD as u32, ReadFromFd {});
     _ = m.attach_system_call(SYSCALL_WRITE_TO_FD as u32, WriteToFd {});
-    m
 }
 
 fn build_from_bytecode(bytecode: &[u8]) -> Machine {
-    let mut m = machine_with_os();
-    m.write_bytes(ByteAddress::ZERO, bytecode);
+    let builder = Builder::from_chunk_bytes(bytecode).expect("invalid EVM image");
+    let mut m = builder.branch_to_machine();
+    attach_os_to_machine(&mut m);
     m
 }
 
@@ -97,7 +96,7 @@ fn main() {
         Err(_) => {
             eprintln!("error: file {bytecode_path} doesn't exist.");
             usage();
-        },
+        }
     };
 
     let mut bytecode = Vec::new();
@@ -106,7 +105,7 @@ fn main() {
         Err(e) => {
             eprintln!("error: io error: {}", e);
             std::process::exit(1);
-        },
+        }
     };
 
     let mut m = build_from_bytecode(bytecode.as_slice());
@@ -115,20 +114,15 @@ fn main() {
         Err(is::InstructionError::InvalidOperation { opcode }) => {
             eprintln!("error: found invalid opcode: {opcode}.");
             std::process::exit(1);
-        },
+        }
     };
 }
 
 /*
 fn main() {
-    use io::Write;
-
     let hello_addr = 0x0000_F000;
     let hello = "Hello, Sailor!\n";
     let hello_bytes = hello.as_bytes();
-
-    let mut m = machine_with_os();
-    m.write_bytes(ByteAddress(hello_addr), hello_bytes);
 
     let ins = [
         is::Instruction::xori(1, 0, SYSCALL_WRITE_TO_FD),
@@ -139,16 +133,11 @@ fn main() {
         is::Instruction::HALT,
     ];
 
-    for i in ins.as_slice() {
-        let bytes = i.encode().to_be_bytes();
-        for b in bytes {
-            print!("{}", char::from_u32(b as u32).unwrap());
-        }
-    }
+    let mut builder = Builder::new();
+    builder.override_with_instructions(&ins);
+    builder.write_bytes(ByteAddress(hello_addr), hello_bytes);
 
-    println!("");
-
-    // m.override_with_instructions(&ins);
-    // m.exec_while_not_halt().unwrap();
+    let mut file = std::fs::File::create("program.evm").unwrap();
+    builder.dump_chunks(&mut file).unwrap();
 }
 */

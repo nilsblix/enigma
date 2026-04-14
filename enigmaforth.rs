@@ -54,7 +54,6 @@ fn main() {
 
     let mut dict = None;
     for &incoming in tokens.iter() {
-        if let Some(word) = find_word(dict, incoming) {
-        }
+        if let Some(word) = find_word(dict, incoming) {}
     }
 }
