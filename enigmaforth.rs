@@ -1,5 +1,4 @@
 use enigma::{Builder, ByteAddress, ByteOffset, WordOffset, is};
-use is::Instruction as I;
 
 struct Putter {
     builder: Builder,
@@ -59,25 +58,25 @@ mod asm {
     use super::*;
 
     pub fn next(p: &mut Putter) {
-        p.inst(I::ldw(10, 11, 0));
-        p.inst(I::addi(11, 11, 4));
-        p.inst(I::ldw(12, 10, 0));
-        p.inst(I::jmpr(0, 12, 0));
+        p.inst(is::ldw(10, 11, 0));
+        p.inst(is::addi(11, 11, 4));
+        p.inst(is::ldw(12, 10, 0));
+        p.inst(is::jmpr(0, 12, 0));
     }
 
     pub fn push_return_stack(p: &mut Putter, reg: usize) {
-        p.inst(I::stw(reg, 30, 0));
-        p.inst(I::subi(30, 30, 4));
+        p.inst(is::stw(reg, 30, 0));
+        p.inst(is::subi(30, 30, 4));
     }
 
     pub fn pop_return_stack(p: &mut Putter, reg: usize) {
-        p.inst(I::addi(30, 30, 4));
-        p.inst(I::ldw(reg, 30, 0));
+        p.inst(is::addi(30, 30, 4));
+        p.inst(is::ldw(reg, 30, 0));
     }
 
     pub fn do_colon(p: &mut Putter) {
         push_return_stack(p, 11);
-        p.inst(I::addi(11, 10, 4));
+        p.inst(is::addi(11, 10, 4));
         next(p)
     }
 
@@ -87,13 +86,13 @@ mod asm {
     }
 
     pub fn push_param_stack(p: &mut Putter, reg: usize) {
-        p.inst(I::stw(reg, 31, 0));
-        p.inst(I::subi(31, 31, 4));
+        p.inst(is::stw(reg, 31, 0));
+        p.inst(is::subi(31, 31, 4));
     }
 
     pub fn pop_param_stack(p: &mut Putter, reg: usize) {
-        p.inst(I::addi(31, 31, 4));
-        p.inst(I::ldw(reg, 31, 0));
+        p.inst(is::addi(31, 31, 4));
+        p.inst(is::ldw(reg, 31, 0));
     }
 }
 
@@ -158,18 +157,18 @@ fn define_variable_or_panic<'p, 'w>(
         // Backpatch the variable cell address once the code body has been
         // fully emitted.
         let lo_patch_addr = p.head;
-        p.inst(I::xori(15, 0, 0));
+        p.inst(is::xori(15, 0, 0));
         let hi_patch_addr = p.head;
-        p.inst(I::orui(15, 15, 0));
+        p.inst(is::orui(15, 15, 0));
         asm::push_param_stack(p, 15);
         asm::next(p);
 
         let ptr = p.head;
         p.builder
-            .write_word(lo_patch_addr, I::xori(15, 0, ptr.0 as u16).encode());
+            .write_word(lo_patch_addr, is::xori(15, 0, ptr.0 as u16).encode());
         p.builder.write_word(
             hi_patch_addr,
-            I::orui(15, 15, (ptr.0 >> 16) as u16).encode(),
+            is::orui(15, 15, (ptr.0 >> 16) as u16).encode(),
         );
         p.word(default_value.unwrap_or(0));
     });
@@ -184,8 +183,8 @@ fn define_const_or_panic<'p, 'w>(
     value: u32,
 ) {
     define_builtin_or_panic(p, flags, name, |p| {
-        p.inst(I::xori(15, 0, value as u16));
-        p.inst(I::orui(15, 15, (value >> 16) as u16));
+        p.inst(is::xori(15, 0, value as u16));
+        p.inst(is::orui(15, 15, (value >> 16) as u16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -210,13 +209,13 @@ fn define_builtin_words(p: &mut Putter) {
     });
 
     define_builtin_or_panic(p, (false, false), "dup".as_bytes(), |p| {
-        p.inst(I::ldw(15, 31, 4));
+        p.inst(is::ldw(15, 31, 4));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
 
     define_builtin_or_panic(p, (false, false), "over".as_bytes(), |p| {
-        p.inst(I::ldw(15, 31, 8));
+        p.inst(is::ldw(15, 31, 8));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -252,8 +251,8 @@ fn define_builtin_words(p: &mut Putter) {
 
     define_builtin_or_panic(p, (false, false), "2dup".as_bytes(), |p| {
         // a b -- a b a b
-        p.inst(I::ldw(15, 31, 8));
-        p.inst(I::ldw(16, 31, 4));
+        p.inst(is::ldw(15, 31, 8));
+        p.inst(is::ldw(16, 31, 4));
         asm::push_param_stack(p, 15);
         asm::push_param_stack(p, 16);
         asm::next(p);
@@ -274,8 +273,8 @@ fn define_builtin_words(p: &mut Putter) {
 
     define_builtin_or_panic(p, (false, false), "?dup".as_bytes(), |p| {
         // duplicate the top if non-zero.
-        p.inst(I::ldw(15, 31, 4));
-        p.inst(I::beq(15, 0, 3));
+        p.inst(is::ldw(15, 31, 4));
+        p.inst(is::beq(15, 0, 3));
         asm::push_param_stack(p, 15); // this is really two instructions,
         // therefore we branch by 3.
         asm::next(p);
@@ -288,7 +287,7 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "+".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::add(15, 15, 16));
+        p.inst(is::add(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -296,7 +295,7 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "-".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::sub(16, 16, 15));
+        p.inst(is::sub(16, 16, 15));
         asm::push_param_stack(p, 16);
         asm::next(p);
     });
@@ -305,7 +304,7 @@ fn define_builtin_words(p: &mut Putter) {
         // top two are equal?
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::eql(15, 15, 16));
+        p.inst(is::eql(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -314,9 +313,9 @@ fn define_builtin_words(p: &mut Putter) {
         // top two are not-equal?
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::eql(15, 15, 16));
+        p.inst(is::eql(15, 15, 16));
         // bitwise negates r15.
-        p.inst(I::xori(15, 15, 1));
+        p.inst(is::xori(15, 15, 1));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -324,7 +323,7 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "<".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::slt(15, 16, 15));
+        p.inst(is::slt(15, 16, 15));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -332,9 +331,9 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "<=".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::slt(17, 16, 15));
-        p.inst(I::eql(18, 16, 15));
-        p.inst(I::or(15, 17, 18));
+        p.inst(is::slt(17, 16, 15));
+        p.inst(is::eql(18, 16, 15));
+        p.inst(is::or(15, 17, 18));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -342,7 +341,7 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), ">".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::slt(15, 15, 16));
+        p.inst(is::slt(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -350,9 +349,9 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), ">=".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::slt(17, 15, 16));
-        p.inst(I::eql(18, 16, 15));
-        p.inst(I::or(15, 17, 18));
+        p.inst(is::slt(17, 15, 16));
+        p.inst(is::eql(18, 16, 15));
+        p.inst(is::or(15, 17, 18));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -364,7 +363,7 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "and".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::and(15, 15, 16));
+        p.inst(is::and(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -372,7 +371,7 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "or".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::or(15, 15, 16));
+        p.inst(is::or(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -380,16 +379,16 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "xor".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::xor(15, 15, 16));
+        p.inst(is::xor(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
 
     define_builtin_or_panic(p, (false, false), "invert".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
-        p.inst(I::xori(16, 0, 0xFFFF));
-        p.inst(I::xorui(16, 16, 0xFFFF));
-        p.inst(I::xor(15, 15, 16));
+        p.inst(is::xori(16, 0, 0xFFFF));
+        p.inst(is::xorui(16, 16, 0xFFFF));
+        p.inst(is::xor(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -404,9 +403,9 @@ fn define_builtin_words(p: &mut Putter) {
     });
 
     define_builtin_or_panic(p, (false, false), "lit".as_bytes(), |p| {
-        p.inst(I::ldw(15, 11, 0));
+        p.inst(is::ldw(15, 11, 0));
         asm::push_param_stack(p, 15);
-        p.inst(I::addi(11, 11, 4));
+        p.inst(is::addi(11, 11, 4));
         asm::next(p);
     });
 
@@ -417,13 +416,13 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "!32".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to store at.
         asm::pop_param_stack(p, 16); // data to store there.
-        p.inst(I::stw(16, 15, 0));
+        p.inst(is::stw(16, 15, 0));
         asm::next(p);
     });
 
     define_builtin_or_panic(p, (false, false), "@32".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to fetch.
-        p.inst(I::ldw(16, 15, 0));
+        p.inst(is::ldw(16, 15, 0));
         asm::push_param_stack(p, 16);
         asm::next(p);
     });
@@ -431,13 +430,13 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "!16".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to store at.
         asm::pop_param_stack(p, 16); // data to store there.
-        p.inst(I::sthw(16, 15, 0));
+        p.inst(is::sthw(16, 15, 0));
         asm::next(p);
     });
 
     define_builtin_or_panic(p, (false, false), "@16".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to fetch.
-        p.inst(I::ldhwu(16, 15, 0));
+        p.inst(is::ldhwu(16, 15, 0));
         asm::push_param_stack(p, 16);
         asm::next(p);
     });
@@ -445,13 +444,13 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "!8".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to store at.
         asm::pop_param_stack(p, 16); // data to store there.
-        p.inst(I::stb(16, 15, 0));
+        p.inst(is::stb(16, 15, 0));
         asm::next(p);
     });
 
     define_builtin_or_panic(p, (false, false), "@8".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to fetch.
-        p.inst(I::ldbu(16, 15, 0));
+        p.inst(is::ldbu(16, 15, 0));
         asm::push_param_stack(p, 16);
         asm::next(p);
     });
@@ -459,18 +458,18 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "+!32".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to store at.
         asm::pop_param_stack(p, 16); // amount to add.
-        p.inst(I::ldw(17, 15, 0));
-        p.inst(I::add(17, 17, 16));
-        p.inst(I::stw(17, 15, 0));
+        p.inst(is::ldw(17, 15, 0));
+        p.inst(is::add(17, 17, 16));
+        p.inst(is::stw(17, 15, 0));
         asm::next(p);
     });
 
     define_builtin_or_panic(p, (false, false), "-!32".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to store at.
         asm::pop_param_stack(p, 16); // amount to sub.
-        p.inst(I::ldw(17, 15, 0));
-        p.inst(I::sub(17, 17, 16));
-        p.inst(I::stw(17, 15, 0));
+        p.inst(is::ldw(17, 15, 0));
+        p.inst(is::sub(17, 17, 16));
+        p.inst(is::stw(17, 15, 0));
         asm::next(p);
     });
 
@@ -502,9 +501,24 @@ fn define_builtin_words(p: &mut Putter) {
     ////////////////////////////////////////////////////////////////////////////
 
     define_const_or_panic(p, (false, false), "VERSION".as_bytes(), 0);
-    define_const_or_panic(p, (false, false), "F_IMM_SHIFT".as_bytes(), F_IMM_SHIFT as u32);
-    define_const_or_panic(p, (false, false), "F_HID_SHIFT".as_bytes(), F_HID_SHIFT as u32);
-    define_const_or_panic(p, (false, false), "F_NAME_MASK".as_bytes(), F_NAME_MASK as u32);
+    define_const_or_panic(
+        p,
+        (false, false),
+        "F_IMM_SHIFT".as_bytes(),
+        F_IMM_SHIFT as u32,
+    );
+    define_const_or_panic(
+        p,
+        (false, false),
+        "F_HID_SHIFT".as_bytes(),
+        F_HID_SHIFT as u32,
+    );
+    define_const_or_panic(
+        p,
+        (false, false),
+        "F_NAME_MASK".as_bytes(),
+        F_NAME_MASK as u32,
+    );
 
     ////////////////////////////////////////////////////////////////////////////
     // Return stack
@@ -535,7 +549,7 @@ fn define_builtin_words(p: &mut Putter) {
         // replaces the head of the return stack with `addr`.
         // addr --
         asm::pop_param_stack(p, 15);
-        p.inst(I::xori(30, 15, 0));
+        p.inst(is::xori(30, 15, 0));
         asm::next(p);
     });
 
@@ -560,7 +574,7 @@ fn define_builtin_words(p: &mut Putter) {
         // replaces the head of param stack's head with `addr`.
         // addr --
         asm::pop_param_stack(p, 15);
-        p.inst(I::xori(31, 15, 0));
+        p.inst(is::xori(31, 15, 0));
         asm::next(p);
     });
 }

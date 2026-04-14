@@ -2,7 +2,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use super::is::Payload;
+use super::is::{self, Payload};
 use super::*;
 
 #[test]
@@ -100,10 +100,10 @@ fn execute_and_advance() {
     //
     // i.e the noop should not be executed.
     let instructions = [
-        Instruction::add(1, 2, 3),
-        Instruction::beq(1, 4, 2),
-        Instruction::noop(),
-        Instruction::shl(6, 1, 5),
+        is::add(1, 2, 3),
+        is::beq(1, 4, 2),
+        is::noop(),
+        is::shl(6, 1, 5),
     ];
 
     let mut m = Machine::from_instructions(instructions.as_slice());
@@ -126,11 +126,7 @@ fn execute_and_advance() {
 
 #[test]
 fn jump_and_link_uses_word_offsets() {
-    let instructions = [
-        Instruction::jmp(1, 2),
-        Instruction::noop(),
-        Instruction::addi(2, 0, 9),
-    ];
+    let instructions = [is::jmp(1, 2), is::noop(), is::addi(2, 0, 9)];
 
     let mut m = Machine::from_instructions(instructions.as_slice());
 
@@ -146,10 +142,10 @@ fn jump_and_link_uses_word_offsets() {
 #[test]
 fn register_relative_jump_uses_word_offsets() {
     let instructions = [
-        Instruction::jmpr(1, 3, 2),
-        Instruction::noop(),
-        Instruction::noop(),
-        Instruction::addi(2, 0, 11),
+        is::jmpr(1, 3, 2),
+        is::noop(),
+        is::noop(),
+        is::addi(2, 0, 11),
     ];
 
     let mut m = Machine::from_instructions(instructions.as_slice());
@@ -167,15 +163,15 @@ fn register_relative_jump_uses_word_offsets() {
 #[test]
 fn simple_store_and_load() {
     let is = [
-        Instruction::stw(1, 2, 0x100),
-        Instruction::sthw(3, 2, 0x104),
-        Instruction::stb(4, 2, 0x106),
-        Instruction::addi(1, 0, 0),
-        Instruction::addi(3, 0, 0),
-        Instruction::addi(4, 0, 0),
-        Instruction::ldw(5, 2, 0x100),
-        Instruction::ldhwu(6, 2, 0x104),
-        Instruction::ldbu(7, 2, 0x106),
+        is::stw(1, 2, 0x100),
+        is::sthw(3, 2, 0x104),
+        is::stb(4, 2, 0x106),
+        is::addi(1, 0, 0),
+        is::addi(3, 0, 0),
+        is::addi(4, 0, 0),
+        is::ldw(5, 2, 0x100),
+        is::ldhwu(6, 2, 0x104),
+        is::ldbu(7, 2, 0x106),
         Instruction::HALT,
     ];
 
@@ -202,10 +198,10 @@ fn simple_store_and_load() {
 #[test]
 fn signed_and_unsigned_loads_extend_correctly() {
     let is = [
-        Instruction::ldhw(1, 10, 0x10),
-        Instruction::ldhwu(2, 10, 0x10),
-        Instruction::ldb(3, 10, 0x20),
-        Instruction::ldbu(4, 10, 0x20),
+        is::ldhw(1, 10, 0x10),
+        is::ldhwu(2, 10, 0x10),
+        is::ldb(3, 10, 0x20),
+        is::ldbu(4, 10, 0x20),
         Instruction::HALT,
     ];
 
@@ -242,11 +238,11 @@ fn builder_chunk_round_trip_preserves_sparse_memory() {
     let hello_addr = ByteAddress(0x0000_F000);
     let hello = b"Hello, Sailor!\n";
     let instructions = [
-        Instruction::xori(1, 0, 1),
-        Instruction::xori(2, 0, 1),
-        Instruction::xori(3, 0, hello_addr.0 as u16),
-        Instruction::xori(4, 0, hello.len() as u16),
-        Instruction::sys(),
+        is::xori(1, 0, 1),
+        is::xori(2, 0, 1),
+        is::xori(3, 0, hello_addr.0 as u16),
+        is::xori(4, 0, hello.len() as u16),
+        is::sys(),
         Instruction::HALT,
     ];
 
@@ -289,16 +285,16 @@ fn builder_copy_into_machine_keeps_original_memory() {
 #[test]
 fn program_fibonacci() {
     let instructions = &[
-        /* 0 */ Instruction::addi(1, 0, 0), // r1 = 0
-        /* 1 */ Instruction::addi(2, 0, 1), // r2 = 1
-        /* 2 */ Instruction::addi(3, 0, 0), // r3 = 0 (counter)
-        /* 3 */ Instruction::addi(4, 0, 7), // r4 = 7 (iterations for fib(8))
-        /* 4 */ Instruction::add(5, 1, 2), // r5 = r1 + r2
-        /* 5 */ Instruction::addi(1, 2, 0), // r1 = r2 (addi r1, r2, 0)
-        /* 6 */ Instruction::addi(2, 5, 0), // r2 = r5
-        /* 7 */ Instruction::addi(3, 3, 1), // r3++
-        /* 8 */ Instruction::bne(3, 4, -5), // if r3 != 7, loop back to addr 4
-        /* 9 */ Instruction::jmp(0, 0),
+        /* 0 */ is::addi(1, 0, 0), // r1 = 0
+        /* 1 */ is::addi(2, 0, 1), // r2 = 1
+        /* 2 */ is::addi(3, 0, 0), // r3 = 0 (counter)
+        /* 3 */ is::addi(4, 0, 7), // r4 = 7 (iterations for fib(8))
+        /* 4 */ is::add(5, 1, 2), // r5 = r1 + r2
+        /* 5 */ is::addi(1, 2, 0), // r1 = r2 (addi r1, r2, 0)
+        /* 6 */ is::addi(2, 5, 0), // r2 = r5
+        /* 7 */ is::addi(3, 3, 1), // r3++
+        /* 8 */ is::bne(3, 4, -5), // if r3 != 7, loop back to addr 4
+        /* 9 */ is::jmp(0, 0),
     ];
 
     let mut m = Machine::from_instructions(instructions);
@@ -464,7 +460,7 @@ fn attach_system_call_rejects_duplicate_number() {
 
 #[test]
 fn system_call_dispatches_and_preserves_r0() {
-    let instructions = [Instruction::sys(), Instruction::HALT];
+    let instructions = [is::sys(), Instruction::HALT];
     let (system_call, state) = new_test_system_call();
     let mut m = Machine::from_instructions(instructions.as_slice());
 
@@ -484,7 +480,7 @@ fn system_call_dispatches_and_preserves_r0() {
 
 #[test]
 fn unknown_system_call_sets_error_code() {
-    let instructions = [Instruction::sys(), Instruction::HALT];
+    let instructions = [is::sys(), Instruction::HALT];
     let mut m = Machine::from_instructions(instructions.as_slice());
     m.write_register(1, 99);
 
@@ -496,7 +492,7 @@ fn unknown_system_call_sets_error_code() {
 #[test]
 #[should_panic(expected = "MMIO access crossed RAM/IO boundary")]
 fn word_load_spanning_ram_and_io_panics() {
-    let instructions = [Instruction::ldw(1, 2, 0), Instruction::HALT];
+    let instructions = [is::ldw(1, 2, 0), Instruction::HALT];
     let (controller, state) = new_test_controller();
     state.bytes.borrow_mut()[0] = 0xBB;
     state.bytes.borrow_mut()[1] = 0xCC;
@@ -516,7 +512,7 @@ fn word_load_spanning_ram_and_io_panics() {
 #[test]
 #[should_panic(expected = "MMIO access crossed controller boundaries")]
 fn word_load_spanning_two_io_blocks_panics() {
-    let instructions = [Instruction::ldw(1, 2, 0), Instruction::HALT];
+    let instructions = [is::ldw(1, 2, 0), Instruction::HALT];
     let (controller_a, state_a) = new_test_controller();
     let (controller_b, state_b) = new_test_controller();
     state_a.bytes.borrow_mut()[BLOCK_SIZE - 1] = 0x11;
@@ -535,7 +531,7 @@ fn word_load_spanning_two_io_blocks_panics() {
 
 #[test]
 fn word_load_within_single_io_block_uses_single_read() {
-    let instructions = [Instruction::ldw(1, 2, 0), Instruction::HALT];
+    let instructions = [is::ldw(1, 2, 0), Instruction::HALT];
     let (controller, state) = new_test_controller();
     state.bytes.borrow_mut()[0] = 0x11;
     state.bytes.borrow_mut()[1] = 0x22;
