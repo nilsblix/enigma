@@ -148,23 +148,33 @@ fn define_builtin_or_panic<'p, 'w, F>(
     body(p);
 }
 
-fn define_variable<'p, 'w>(
+fn define_variable_or_panic<'p, 'w>(
     p: &'p mut Putter,
     flags: (bool, bool),
     name: &'w [u8],
     default_value: Option<u32>,
-) {
+) -> ByteAddress {
     define_builtin_or_panic(p, flags, name, |p| {
-        // p.head now points directly after the codeword. We want a FORTH
-        // variable to put the address of its stored machine-word on the stack.
-        // The ptr we want to push onto the stack is located 4 words ahead.
-        let ptr = p.head.overflowing_add_words(WordOffset(4)).0.0;
-        p.inst(I::xori(15, 0, ptr as u16));
-        p.inst(I::xorui(15, 0, (ptr >> 16) as u16));
-        asm::push_param_stack(p, 15); // 2 instructions.
-        p.word(default_value.unwrap_or(0));
+        // Backpatch the variable cell address once the code body has been
+        // fully emitted.
+        let lo_patch_addr = p.head;
+        p.inst(I::xori(15, 0, 0));
+        let hi_patch_addr = p.head;
+        p.inst(I::orui(15, 15, 0));
+        asm::push_param_stack(p, 15);
         asm::next(p);
+
+        let ptr = p.head;
+        p.builder
+            .write_word(lo_patch_addr, I::xori(15, 0, ptr.0 as u16).encode());
+        p.builder.write_word(
+            hi_patch_addr,
+            I::orui(15, 15, (ptr.0 >> 16) as u16).encode(),
+        );
+        p.word(default_value.unwrap_or(0));
     });
+
+    p.head.overflowing_add_words(WordOffset(-1)).0
 }
 
 fn define_builtin_words(p: &mut Putter) {
@@ -180,8 +190,8 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), "swap".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        asm::push_param_stack(p, 16);
         asm::push_param_stack(p, 15);
+        asm::push_param_stack(p, 16);
         asm::next(p);
     });
 
@@ -326,7 +336,7 @@ fn define_builtin_words(p: &mut Putter) {
     define_builtin_or_panic(p, (false, false), ">=".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
         asm::pop_param_stack(p, 16);
-        p.inst(I::slt(15, 15, 16));
+        p.inst(I::slt(17, 15, 16));
         p.inst(I::eql(18, 16, 15));
         p.inst(I::or(15, 17, 18));
         asm::push_param_stack(p, 15);
@@ -363,10 +373,9 @@ fn define_builtin_words(p: &mut Putter) {
 
     define_builtin_or_panic(p, (false, false), "invert".as_bytes(), |p| {
         asm::pop_param_stack(p, 15);
-        p.inst(I::beq(15, 0, 7));
-        asm::push_param_stack(p, 0); // 2 instructions.
-        asm::next(p); // 4 instructions.
-        p.inst(I::xori(15, 0, 1));
+        p.inst(I::xori(16, 0, 0xFFFF));
+        p.inst(I::xorui(16, 16, 0xFFFF));
+        p.inst(I::xor(15, 15, 16));
         asm::push_param_stack(p, 15);
         asm::next(p);
     });
@@ -381,7 +390,8 @@ fn define_builtin_words(p: &mut Putter) {
     });
 
     define_builtin_or_panic(p, (false, false), "lit".as_bytes(), |p| {
-        asm::push_param_stack(p, 11);
+        p.inst(I::ldw(15, 11, 0));
+        asm::push_param_stack(p, 15);
         p.inst(I::addi(11, 11, 4));
         asm::next(p);
     });
@@ -413,7 +423,7 @@ fn define_builtin_words(p: &mut Putter) {
 
     define_builtin_or_panic(p, (false, false), "@16".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to fetch.
-        p.inst(I::ldhw(16, 15, 0));
+        p.inst(I::ldhwu(16, 15, 0));
         asm::push_param_stack(p, 16);
         asm::next(p);
     });
@@ -427,7 +437,7 @@ fn define_builtin_words(p: &mut Putter) {
 
     define_builtin_or_panic(p, (false, false), "@8".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to fetch.
-        p.inst(I::ldb(16, 15, 0));
+        p.inst(I::ldbu(16, 15, 0));
         asm::push_param_stack(p, 16);
         asm::next(p);
     });
@@ -441,7 +451,7 @@ fn define_builtin_words(p: &mut Putter) {
         asm::next(p);
     });
 
-    define_builtin_or_panic(p, (false, false), "+!32".as_bytes(), |p| {
+    define_builtin_or_panic(p, (false, false), "-!32".as_bytes(), |p| {
         asm::pop_param_stack(p, 15); // address to store at.
         asm::pop_param_stack(p, 16); // amount to sub.
         p.inst(I::ldw(17, 15, 0));
@@ -454,19 +464,30 @@ fn define_builtin_words(p: &mut Putter) {
     // Variables
     ////////////////////////////////////////////////////////////////////////////
 
-    define_variable(p, (false, false), "state".as_bytes(), None);
-    define_variable(p, (false, false), "mem".as_bytes(), None);
-    define_variable(p, (false, false), "latest".as_bytes(), None);
-    define_variable(
+    let state_addr = define_variable_or_panic(p, (false, false), "state".as_bytes(), None);
+    let mem_addr = define_variable_or_panic(p, (false, false), "mem".as_bytes(), None);
+    let latest_addr = define_variable_or_panic(p, (false, false), "latest".as_bytes(), None);
+    let stack_start_addr = define_variable_or_panic(
         p,
         (false, false),
         "stack_start".as_bytes(),
         Some(enigma::STACK_BEGINNING),
     );
-    define_variable(p, (false, false), "number_base".as_bytes(), Some(10));
+    let number_base_addr =
+        define_variable_or_panic(p, (false, false), "number_base".as_bytes(), Some(10));
+
+    p.builder.write_word(state_addr, 0);
+    p.builder.write_word(mem_addr, p.head.0);
+    p.builder.write_word(latest_addr, p.latest.0);
+    p.builder
+        .write_word(stack_start_addr, enigma::STACK_BEGINNING);
+    p.builder.write_word(number_base_addr, 10);
 }
 
 fn main() {
     let mut p = Putter::new();
     define_builtin_words(&mut p);
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+    p.builder.dump_chunks(&mut stdout).expect("io error");
 }
