@@ -1,4 +1,4 @@
-use enigma::{Builder, ByteAddress, ByteOffset, is};
+use enigma::{Builder, ByteAddress, ByteOffset, WordOffset, is};
 use is::Instruction as I;
 
 struct Putter {
@@ -24,7 +24,10 @@ impl Putter {
     ///
     /// We also ignore overflow.
     fn increment_head(&mut self, amount_of_bytes: u32) {
-        self.head = self.head.overflowing_add_bytes(ByteOffset(amount_of_bytes as i32)).0;
+        self.head = self
+            .head
+            .overflowing_add_bytes(ByteOffset(amount_of_bytes as i32))
+            .0;
     }
 
     fn byte(&mut self, b: u8) {
@@ -110,11 +113,7 @@ const F_NAME_MASK: u8 = 0b00011111;
 /// ```
 ///
 /// The middle bit of flag currently means nothing.
-fn define_until_code_or_panic<'p, 'w>(
-    p: &'p mut Putter,
-    flags: (bool, bool),
-    name: &'w [u8]
-) {
+fn define_until_code_or_panic<'p, 'w>(p: &'p mut Putter, flags: (bool, bool), name: &'w [u8]) {
     if name.len() >= 32 {
         panic!("tried to define a word with a name longer than 32 bytes");
     }
@@ -138,8 +137,7 @@ fn define_builtin_or_panic<'p, 'w, F>(
     flags: (bool, bool),
     name: &'w [u8],
     body: F,
-)
-where
+) where
     F: FnOnce(&mut Putter),
 {
     define_until_code_or_panic(p, flags, name);
@@ -148,6 +146,25 @@ where
     let body_addr = p.head.0 + 4;
     p.word(body_addr);
     body(p);
+}
+
+fn define_variable<'p, 'w>(
+    p: &'p mut Putter,
+    flags: (bool, bool),
+    name: &'w [u8],
+    default_value: Option<u32>,
+) {
+    define_builtin_or_panic(p, flags, name, |p| {
+        // p.head now points directly after the codeword. We want a FORTH
+        // variable to put the address of its stored machine-word on the stack.
+        // The ptr we want to push onto the stack is located 4 words ahead.
+        let ptr = p.head.overflowing_add_words(WordOffset(4)).0.0;
+        p.inst(I::xori(15, 0, ptr as u16));
+        p.inst(I::xorui(15, 0, (ptr >> 16) as u16));
+        asm::push_param_stack(p, 15); // 2 instructions.
+        p.word(default_value.unwrap_or(0));
+        asm::next(p);
+    });
 }
 
 fn define_builtin_words(p: &mut Putter) {
@@ -236,7 +253,7 @@ fn define_builtin_words(p: &mut Putter) {
         p.inst(I::ldw(15, 31, 4));
         p.inst(I::beq(15, 0, 3));
         asm::push_param_stack(p, 15); // this is really two instructions,
-                                      // therefore we branch by 3.
+        // therefore we branch by 3.
         asm::next(p);
     });
 
@@ -348,7 +365,7 @@ fn define_builtin_words(p: &mut Putter) {
         asm::pop_param_stack(p, 15);
         p.inst(I::beq(15, 0, 7));
         asm::push_param_stack(p, 0); // 2 instructions.
-        asm::next(p);                // 4 instructions.
+        asm::next(p); // 4 instructions.
         p.inst(I::xori(15, 0, 1));
         asm::push_param_stack(p, 15);
         asm::next(p);
@@ -432,6 +449,21 @@ fn define_builtin_words(p: &mut Putter) {
         p.inst(I::stw(17, 15, 0));
         asm::next(p);
     });
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Variables
+    ////////////////////////////////////////////////////////////////////////////
+
+    define_variable(p, (false, false), "state".as_bytes(), None);
+    define_variable(p, (false, false), "mem".as_bytes(), None);
+    define_variable(p, (false, false), "latest".as_bytes(), None);
+    define_variable(
+        p,
+        (false, false),
+        "stack_start".as_bytes(),
+        Some(enigma::STACK_BEGINNING),
+    );
+    define_variable(p, (false, false), "number_base".as_bytes(), Some(10));
 }
 
 fn main() {
