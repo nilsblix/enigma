@@ -177,6 +177,20 @@ fn define_variable_or_panic<'p, 'w>(
     p.head.overflowing_add_words(WordOffset(-1)).0
 }
 
+fn define_const_or_panic<'p, 'w>(
+    p: &'p mut Putter,
+    flags: (bool, bool),
+    name: &'w [u8],
+    value: u32,
+) {
+    define_builtin_or_panic(p, flags, name, |p| {
+        p.inst(I::xori(15, 0, value as u16));
+        p.inst(I::orui(15, 15, (value >> 16) as u16));
+        asm::push_param_stack(p, 15);
+        asm::next(p);
+    });
+}
+
 fn define_builtin_words(p: &mut Putter) {
     ////////////////////////////////////////////////////////////////////////////
     // Common words
@@ -482,6 +496,73 @@ fn define_builtin_words(p: &mut Putter) {
     p.builder
         .write_word(stack_start_addr, enigma::STACK_BEGINNING);
     p.builder.write_word(number_base_addr, 10);
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Constants
+    ////////////////////////////////////////////////////////////////////////////
+
+    define_const_or_panic(p, (false, false), "VERSION".as_bytes(), 0);
+    define_const_or_panic(p, (false, false), "F_IMM_SHIFT".as_bytes(), F_IMM_SHIFT as u32);
+    define_const_or_panic(p, (false, false), "F_HID_SHIFT".as_bytes(), F_HID_SHIFT as u32);
+    define_const_or_panic(p, (false, false), "F_NAME_MASK".as_bytes(), F_NAME_MASK as u32);
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Return stack
+    ////////////////////////////////////////////////////////////////////////////
+
+    define_builtin_or_panic(p, (false, false), ">R".as_bytes(), |p| {
+        // pop param stack into return stack.
+        asm::pop_param_stack(p, 15);
+        asm::push_return_stack(p, 15);
+        asm::next(p);
+    });
+
+    define_builtin_or_panic(p, (false, false), "R>".as_bytes(), |p| {
+        // pop return stack into param stack.
+        asm::pop_return_stack(p, 15);
+        asm::push_param_stack(p, 15);
+        asm::next(p);
+    });
+
+    define_builtin_or_panic(p, (false, false), "R@".as_bytes(), |p| {
+        // pushes the ptr to the return stack's head to the param stack.
+        // -- addr
+        asm::push_param_stack(p, 30);
+        asm::next(p);
+    });
+
+    define_builtin_or_panic(p, (false, false), "R!".as_bytes(), |p| {
+        // replaces the head of the return stack with `addr`.
+        // addr --
+        asm::pop_param_stack(p, 15);
+        p.inst(I::xori(30, 15, 0));
+        asm::next(p);
+    });
+
+    define_builtin_or_panic(p, (false, false), "Rdrop".as_bytes(), |p| {
+        // drop from the return stack.
+        asm::pop_return_stack(p, 0);
+        asm::next(p);
+    });
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Parameter stack
+    ////////////////////////////////////////////////////////////////////////////
+
+    define_builtin_or_panic(p, (false, false), "P@".as_bytes(), |p| {
+        // pushes the ptr to the param stack's head to the param stack.
+        // -- addr
+        asm::push_param_stack(p, 31);
+        asm::next(p);
+    });
+
+    define_builtin_or_panic(p, (false, false), "P!".as_bytes(), |p| {
+        // replaces the head of param stack's head with `addr`.
+        // addr --
+        asm::pop_param_stack(p, 15);
+        p.inst(I::xori(31, 15, 0));
+        asm::next(p);
+    });
 }
 
 fn main() {
