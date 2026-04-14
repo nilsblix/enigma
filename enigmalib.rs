@@ -506,10 +506,10 @@ pub const WORD_SIZE_BYTES: u32 = 4;
 /// Register purposes:
 ///
 /// * r0 is read/write 0.
+/// * r1 is used as the syscall nr when executing the [`Op::Sys`] instruction.
+/// * r2 to r7 inclusive are used as argument registers to system calls.
 /// * r31 is initialized to be the stack pointer.
-///
-/// All other registers are general purpose registers, and can be used without
-/// cleanup.
+/// * r15 to r30 are general-purpose registers, and can be used without cleanup.
 pub struct Registers {
     words: [u32; REGISTER_COUNT],
 }

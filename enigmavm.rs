@@ -117,27 +117,3 @@ fn main() {
         }
     };
 }
-
-/*
-fn main() {
-    let hello_addr = 0x0000_F000;
-    let hello = "Hello, Sailor!\n";
-    let hello_bytes = hello.as_bytes();
-
-    let ins = [
-        is::Instruction::xori(1, 0, SYSCALL_WRITE_TO_FD),
-        is::Instruction::xori(2, 0, STDOUT_FD),
-        is::Instruction::xori(3, 0, hello_addr as u16),
-        is::Instruction::xori(4, 0, hello_bytes.len() as u16),
-        is::Instruction::sys(),
-        is::Instruction::HALT,
-    ];
-
-    let mut builder = Builder::new();
-    builder.override_with_instructions(&ins);
-    builder.write_bytes(ByteAddress(hello_addr), hello_bytes);
-
-    let mut file = std::fs::File::create("program.evm").unwrap();
-    builder.dump_chunks(&mut file).unwrap();
-}
-*/
