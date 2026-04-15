@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use enigma::{Builder, ByteAddress, Machine, Memory, Registers, SystemCall, is};
+use enigma::{Image, ByteAddress, Machine, Memory, Registers, SystemCall, is};
 use std::{
     fs::File,
     io::{self, Read},
@@ -67,8 +67,8 @@ fn attach_os_to_machine(m: &mut Machine) {
 }
 
 fn build_from_bytecode(bytecode: &[u8]) -> Machine {
-    let builder = Builder::from_chunk_bytes(bytecode).expect("invalid EVM image");
-    let mut m = builder.branch_to_machine();
+    let image = Image::from_chunk_bytes(bytecode).expect("invalid EVM image");
+    let mut m = image.branch_to_machine();
     attach_os_to_machine(&mut m);
     m
 }

@@ -1325,27 +1325,27 @@ impl Machine {
     }
 }
 
-pub struct Builder {
+pub struct Image {
     mem: Memory,
 }
 
-const BUILDER_MAGIC: [u8; 4] = *b"EVM1";
+const IMAGE_MAGIC: [u8; 4] = *b"EVM1";
 
-impl Builder {
-    pub fn new() -> Builder {
-        Builder { mem: Memory::new() }
+impl Image {
+    pub fn new() -> Image {
+        Image { mem: Memory::new() }
     }
 
-    pub fn from_chunk_bytes(bytes: &[u8]) -> io::Result<Builder> {
-        if bytes.len() < BUILDER_MAGIC.len() || bytes[..BUILDER_MAGIC.len()] != BUILDER_MAGIC {
+    pub fn from_chunk_bytes(bytes: &[u8]) -> io::Result<Image> {
+        if bytes.len() < IMAGE_MAGIC.len() || bytes[..IMAGE_MAGIC.len()] != IMAGE_MAGIC {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid EVM image header",
             ));
         }
 
-        let mut builder = Builder::new();
-        let mut cursor = BUILDER_MAGIC.len();
+        let mut image = Image::new();
+        let mut cursor = IMAGE_MAGIC.len();
 
         while cursor < bytes.len() {
             if bytes.len() - cursor < 8 {
@@ -1370,20 +1370,20 @@ impl Builder {
 
             let chunk = &bytes[cursor..cursor + len];
             cursor += len;
-            builder.write_bytes(ByteAddress(addr), chunk);
+            image.write_bytes(ByteAddress(addr), chunk);
         }
 
-        Ok(builder)
+        Ok(image)
     }
 
-    pub fn load_chunks(reader: &mut impl Read) -> io::Result<Builder> {
+    pub fn load_chunks(reader: &mut impl Read) -> io::Result<Image> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
-        Builder::from_chunk_bytes(bytes.as_slice())
+        Image::from_chunk_bytes(bytes.as_slice())
     }
 
     pub fn dump_chunks(&self, writer: &mut impl Write) -> io::Result<()> {
-        writer.write_all(&BUILDER_MAGIC)?;
+        writer.write_all(&IMAGE_MAGIC)?;
 
         for (block_index, block) in self.mem.blocks.iter().enumerate() {
             let mem = match block {

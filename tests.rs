@@ -234,7 +234,7 @@ fn word_access_crosses_ram_block_boundaries() {
 }
 
 #[test]
-fn builder_chunk_round_trip_preserves_sparse_memory() {
+fn image_chunk_round_trip_preserves_sparse_memory() {
     let hello_addr = ByteAddress(0x0000_F000);
     let hello = b"Hello, Sailor!\n";
     let instructions = [
@@ -246,15 +246,15 @@ fn builder_chunk_round_trip_preserves_sparse_memory() {
         Instruction::HALT,
     ];
 
-    let mut builder = Builder::new();
-    builder.override_with_instructions(instructions.as_slice());
-    builder.write_bytes(hello_addr, hello);
+    let mut image = Image::new();
+    image.override_with_instructions(instructions.as_slice());
+    image.write_bytes(hello_addr, hello);
 
     let mut chunk_bytes = Vec::new();
-    builder.dump_chunks(&mut chunk_bytes).unwrap();
+    image.dump_chunks(&mut chunk_bytes).unwrap();
     assert!(chunk_bytes.len() < hello_addr.0 as usize);
 
-    let rebuilt = Builder::from_chunk_bytes(chunk_bytes.as_slice()).unwrap();
+    let rebuilt = Image::from_chunk_bytes(chunk_bytes.as_slice()).unwrap();
     let mut machine = rebuilt.branch_to_machine();
 
     assert_eq!(
@@ -268,15 +268,15 @@ fn builder_chunk_round_trip_preserves_sparse_memory() {
 }
 
 #[test]
-fn builder_copy_into_machine_keeps_original_memory() {
+fn image_copy_into_machine_keeps_original_memory() {
     let addr = ByteAddress(0x0000_2000);
-    let mut builder = Builder::new();
-    builder.write_word(addr, 0x1234_5678);
+    let mut image = Image::new();
+    image.write_word(addr, 0x1234_5678);
 
-    let mut machine_a = builder.branch_to_machine();
+    let mut machine_a = image.branch_to_machine();
     machine_a.write_word(addr, 0xAABB_CCDD);
 
-    let mut machine_b = builder.branch_to_machine();
+    let mut machine_b = image.branch_to_machine();
 
     assert_eq!(machine_a.read_word(addr), 0xAABB_CCDD);
     assert_eq!(machine_b.read_word(addr), 0x1234_5678);

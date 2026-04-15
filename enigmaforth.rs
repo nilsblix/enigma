@@ -1,7 +1,7 @@
-use enigma::{Builder, ByteAddress, ByteOffset, WordOffset, is};
+use enigma::{Image, ByteAddress, ByteOffset, WordOffset, is};
 
 struct Putter {
-    builder: Builder,
+    image: Image,
     head: ByteAddress,
     // TODO: Move this into some other structure.
     latest: ByteAddress,
@@ -12,7 +12,7 @@ impl Putter {
 
     fn new() -> Putter {
         Putter {
-            builder: Builder::new(),
+            image: Image::new(),
             head: Self::DICT_START,
             latest: ByteAddress::ZERO,
         }
@@ -30,12 +30,12 @@ impl Putter {
     }
 
     fn byte(&mut self, b: u8) {
-        self.builder.write_byte(self.head, b);
+        self.image.write_byte(self.head, b);
         self.increment_head(1);
     }
 
     fn bytes(&mut self, bytes: &[u8]) {
-        self.builder.write_bytes(self.head, bytes);
+        self.image.write_bytes(self.head, bytes);
         self.increment_head(bytes.len() as u32);
     }
 
@@ -45,7 +45,7 @@ impl Putter {
     }
 
     fn word(&mut self, word: u32) {
-        self.builder.write_word(self.head, word);
+        self.image.write_word(self.head, word);
         self.increment_head(4);
     }
 
@@ -164,9 +164,9 @@ fn define_variable_or_panic<'p, 'w>(
         asm::next(p);
 
         let ptr = p.head;
-        p.builder
+        p.image
             .write_word(lo_patch_addr, is::xori(15, 0, ptr.0 as u16).encode());
-        p.builder.write_word(
+        p.image.write_word(
             hi_patch_addr,
             is::orui(15, 15, (ptr.0 >> 16) as u16).encode(),
         );
@@ -489,12 +489,12 @@ fn define_builtin_words(p: &mut Putter) {
     let number_base_addr =
         define_variable_or_panic(p, (false, false), "number_base".as_bytes(), Some(10));
 
-    p.builder.write_word(state_addr, 0);
-    p.builder.write_word(mem_addr, p.head.0);
-    p.builder.write_word(latest_addr, p.latest.0);
-    p.builder
+    p.image.write_word(state_addr, 0);
+    p.image.write_word(mem_addr, p.head.0);
+    p.image.write_word(latest_addr, p.latest.0);
+    p.image
         .write_word(stack_start_addr, enigma::STACK_BEGINNING);
-    p.builder.write_word(number_base_addr, 10);
+    p.image.write_word(number_base_addr, 10);
 
     ////////////////////////////////////////////////////////////////////////////
     // Constants
@@ -584,5 +584,5 @@ fn main() {
     define_builtin_words(&mut p);
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
-    p.builder.dump_chunks(&mut stdout).expect("io error");
+    p.image.dump_chunks(&mut stdout).expect("io error");
 }
