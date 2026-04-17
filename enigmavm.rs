@@ -1,9 +1,10 @@
 #![allow(unused)]
 
-use enigma::{Image, ByteAddress, Machine, Memory, Registers, SystemCall, is};
+use enigma::{ByteAddress, Image, Machine, Memory, Registers, SystemCall, is};
 use std::{
     fs::File,
     io::{self, Read},
+    mem::ManuallyDrop,
     os::unix::io::FromRawFd,
 };
 
@@ -21,11 +22,12 @@ impl SystemCall for ReadFromFd {
         let buf_addr = ByteAddress(regs.read(3));
         let count = regs.read(4) as usize;
 
-        let f = unsafe { File::from_raw_fd(fd) };
-        let mut x = Vec::with_capacity(count);
-        _ = f.take(count as u64).read_to_end(&mut x);
+        let mut f = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+        let mut buf = vec![0u8; count];
+        let bytes_read = (&mut *f).read(buf.as_mut_slice()).unwrap_or(0);
 
-        mem.write_raw_bytes(buf_addr, x.as_slice());
+        mem.write_raw_bytes(buf_addr, &buf[..bytes_read]);
+        regs.write(1, bytes_read as u32);
     }
 }
 
@@ -43,14 +45,12 @@ impl SystemCall for WriteToFd {
         let buf_addr = ByteAddress(regs.read(3));
         let count = regs.read(4) as usize;
 
-        let mut f = unsafe { File::from_raw_fd(fd) };
-        let mut buf = Vec::with_capacity(count);
-        unsafe { buf.set_len(count) }
+        let mut f = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+        let mut buf = vec![0u8; count];
         mem.read_raw_bytes(buf_addr, buf.as_mut_slice());
-        let s = String::from_utf8(buf).expect("non utf8 bytes");
-        _ = write!(&mut f, "{}", s);
-
-        _ = f.flush();
+        _ = (&mut *f).write_all(buf.as_slice());
+        _ = (&mut *f).flush();
+        regs.write(1, count as u32);
     }
 }
 
