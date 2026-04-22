@@ -3,10 +3,10 @@
 Enigma is a 32-bit, big-endian virtual machine with a flat 4 GiB address space
 backed by sparse 64 KiB blocks.
 
-[!NOTE]
-Small and experimental. Do not expect this project to be mature and have
-reasonable standards. The EVM (Enigma Virtual Machine) was made for learning
-purposes, and has served as a fun side-project.
+> [!IMPORTANT]
+> Small and experimental. Do not expect this project to be mature and have
+> reasonable standards. The EVM (Enigma Virtual Machine) was made for learning
+> purposes, and has served as a fun side-project.
 
 ## Current Stage
 
