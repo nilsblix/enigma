@@ -1,29 +1,70 @@
 # Enigma
 
-> Some thoughts about the current design:
+Enigma is a 32-bit, big-endian virtual machine with a flat 4 GiB address space
+backed by sparse 64 KiB blocks.
 
-32-bit, big-endian Virtual Machine.
+[!NOTE]
+Small and experimental. Do not expect this project to be mature and have
+reasonable standards. The EVM (Enigma Virtual Machine) was made for learning
+purposes, and has served as a fun side-project.
 
-32 registers (r0 is read/write 0, and r31 is initialized as a stack-pointer).
+## Current Stage
 
-This VM is OS-less, i.e it simply emulates some imaginary cpu-architecture.
+The VM core is implemented and runnable. `enigmavm` can load `.evm` images,
+execute the instruction set below, and expose sparse RAM, MMIO, and a small
+POSIX-oriented syscall layer. The assembler and higher-level tooling are still
+in progress.
 
-## We have __two__ types of instructions:
+**Note** that the `enigmavm` is currently focused on POSIX-style syscalls, and
+might be changed in the future to accomodate more systems. The core library,
+namely `enigmalib`, is OS-agnostic, and all IO/Syscall implementations decide
+what system the VM is meant for.
+
+## Machine Model
+
+- 32 registers.
+- `r0` is hard-wired to zero.
+- `r1` is the syscall number on `sys`, and also the primary return register.
+- `r2..r7` are syscall argument registers.
+- `r31` is the stack pointer and starts at `0xEFFFFFFC`.
+- Execution starts at byte address `0x00000000`.
+- MMIO begins at `0xF0000000`.
+
+## Instruction Set
+
+All instructions are 32-bit words.
+
+- R-type: `add`, `sub`, `shl`, `shr`, `or`, `and`, `xor`, `slt`, `sltu`,
+  `eql`, `deb`.
+- I-type: `sys`, `add_i`, `sub_i`, `shl_i`, `shr_i`, `or_i`, `oru_i`,
+  `and_i`, `andu_i`, `xor_i`, `xoru_i`, `slt_i`, `sltu_i`, `ldw_i`,
+  `ldhw_i`, `ldhwu_i`, `ldb_i`, `ldbu_i`, `stw_i`, `sthw_i`, `stb_i`,
+  `jmp_i`, `jmpr_i`, `beq_i`, `bne_i`.
+
+Notes:
+
+- Arithmetic is wrapping 32-bit arithmetic.
+- `ldw/ldhw/ldhwu/ldb/ldbu` and `stw/sthw/stb` use `ra + sign_extend(imm16)`
+  as a byte address.
+- `ldhw` and `ldb` sign-extend; `ldhwu` and `ldbu` zero-extend.
+- `jmp`, `jmpr`, `beq`, and `bne` use signed 16-bit word offsets.
+- `jmp` and `jmpr` write the return address (`pc + 4`) to `rr`.
+
+## Encoding And Decoding
+
+The top 6 bits always store the opcode.
 
 ### R-type
 
-Bit packed as such:
-```ini
+```text
 +------------------------------------+
 |   6  |  5  |  5  |  5  |    11     |
 +------------------------------------+
- opcode  rr    ra    rb     packing (unused)
+ opcode  rr    ra    rb     unused
 ```
 
-Note that packing is unused.
-
 ### I-type
-Bit packed as such:
+
 ```text
 +------------------------------------+
 |   6  |  5  |  5  |       16        |
@@ -31,30 +72,27 @@ Bit packed as such:
  opcode  rr    ra       immediate
 ```
 
-## Address space
+- Encoding is `opcode << 26 | payload`.
+- Decoding first reads the opcode, then selects the payload shape:
+  - `0x00`: `noop`
+  - `0x01..=0x1F`: R-type
+  - `0x20..=0x3F`: I-type
+- The 16-bit immediate is stored verbatim; signedness depends on the
+  instruction.
 
-Load/store instructions can access the entire memory space. It is up to the
-caller to manage that memory. This paradigm can lead to some sketchy programs
-if not handled correctly, given that there is no internal distinction between
-different segments, such as _text_, _data_, _heap_ or _stack_.
+## Image Format
 
-Register no. 32 (r31) is the designated stack-pointer, and therefore gets
-initialized to the stack beginning, which is `0xEFFFFFC`. That is pretty much
-the only segment known in the source-code of the VM. MMIO gets mapped above the
-stack, i.e addresses starting with `0xF...` are inherently IO.
+`.evm` is a sparse chunked image format.
 
-The above is only a convention however. Your program can do whatever it wants.
-Everything is mutable here.
+- Header: ASCII magic `EVM1`
+- Body: repeated chunks of
+  - `addr: u32` big-endian
+  - `len: u32` big-endian
+  - `len` raw bytes
 
-## Memory mapping
+Notes:
 
-This VM is 32-bit, i.e `~4GB` address space. We don't allocate the entire 4GB
-upfront, but instead allocate __blocks__ of `2^16 bytes` each. This way we can
-designate what each block does.
-
-Currently each block can be __Empty__, __Memory__ mapped (64 KB), or __Io__
-mapped.
-
-__Io__ means that that address block (2^16 bytes) is mapped to some
-__IoController__ which on read/write/tick performs some side-effect (actually
-only on write currently, but might be changed in the future).
+- `addr` is an absolute byte address in the VM address space.
+- There is no relocation table, section table, or entry-point field.
+- Loading writes each chunk directly into sparse memory.
+- Dumping skips zero-filled gaps, so the image only stores populated ranges.
