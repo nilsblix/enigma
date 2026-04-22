@@ -11,13 +11,47 @@ pub const BLOCK_COUNT: usize = 1 << 16;
 pub const REGISTER_COUNT: usize = 32;
 pub const WORD_SIZE_BYTES: u32 = 4;
 
-/// Register purposes:
+/// Enigma uses 32 general-purpose 32-bit registers with the following standard
+/// ABI roles:
 ///
-/// * r0 is read/write 0.
-/// * r1 is used as the syscall nr when executing the [`Op::Sys`] instruction.
-/// * r2 to r7 inclusive are used as argument registers to system calls.
-/// * r31 is initialized to be the stack pointer.
-/// * r15 to r30 are general-purpose registers, and can be used without cleanup.
+/// * `r0`  (`zero`) is hard-wired to zero.
+/// * `r1`  (`v0`) is the primary return register, and holds the syscall number
+///   when executing [`Op::Sys`].
+/// * `r2`  (`v1` / `a0`) is the secondary return register, and the first
+///   syscall argument register.
+/// * `r3`  (`a1`) is the second argument register.
+/// * `r4`  (`a2`) is the third argument register.
+/// * `r5`  (`a3`) is the fourth argument register.
+/// * `r6`  (`a4`) is the fifth argument register.
+/// * `r7`  (`a5`) is the sixth argument register.
+/// * `r8`  (`t0`) is a caller-saved temporary register.
+/// * `r9`  (`t1`) is a caller-saved temporary register.
+/// * `r10` (`t2`) is a caller-saved temporary register.
+/// * `r11` (`t3`) is a caller-saved temporary register.
+/// * `r12` (`t4`) is a caller-saved temporary register.
+/// * `r13` (`t5`) is a caller-saved temporary register.
+/// * `r14` (`t6`) is a caller-saved temporary register.
+/// * `r15` (`t7`) is a caller-saved temporary register.
+/// * `r16` (`s0`) is a callee-saved register.
+/// * `r17` (`s1`) is a callee-saved register.
+/// * `r18` (`s2`) is a callee-saved register.
+/// * `r19` (`s3`) is a callee-saved register.
+/// * `r20` (`s4`) is a callee-saved register.
+/// * `r21` (`s5`) is a callee-saved register.
+/// * `r22` (`s6`) is a callee-saved register.
+/// * `r23` (`s7`) is a callee-saved register.
+/// * `r24` (`s8`) is a callee-saved register.
+/// * `r25` (`s9`) is a callee-saved register.
+/// * `r26` (`s10`) is a callee-saved register.
+/// * `r27` (`s11`) is a callee-saved register.
+/// * `r28` (`gp`) is the global pointer register.
+/// * `r29` (`lr`) is the link register by convention for calls and returns.
+/// * `r30` (`fp`) is the frame pointer register.
+/// * `r31` (`sp`) is the stack pointer register and is initialized on reset.
+///
+/// The VM only enforces the special behavior of `r0`, and initializes `r31`
+/// during machine construction. The remaining roles are the standard register
+/// convention for Enigma programs, tools, and system interfaces.
 pub struct Registers {
     words: [u32; REGISTER_COUNT],
 }
