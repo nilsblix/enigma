@@ -246,7 +246,7 @@ fn image_chunk_round_trip_preserves_sparse_memory() {
         Instruction::HALT,
     ];
 
-    let mut image = Image::new();
+    let mut image = image::Image::new();
     image.override_with_instructions(instructions.as_slice());
     image.write_bytes(hello_addr, hello);
 
@@ -254,7 +254,7 @@ fn image_chunk_round_trip_preserves_sparse_memory() {
     image.dump_chunks(&mut chunk_bytes).unwrap();
     assert!(chunk_bytes.len() < hello_addr.0 as usize);
 
-    let rebuilt = Image::from_chunk_bytes(chunk_bytes.as_slice()).unwrap();
+    let rebuilt = image::Image::from_chunk_bytes(chunk_bytes.as_slice()).unwrap();
     let mut machine = rebuilt.branch_to_machine();
 
     assert_eq!(
@@ -270,7 +270,7 @@ fn image_chunk_round_trip_preserves_sparse_memory() {
 #[test]
 fn image_copy_into_machine_keeps_original_memory() {
     let addr = ByteAddress(0x0000_2000);
-    let mut image = Image::new();
+    let mut image = image::Image::new();
     image.write_word(addr, 0x1234_5678);
 
     let mut machine_a = image.branch_to_machine();

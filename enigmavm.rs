@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use enigma::{ByteAddress, Image, Machine, Memory, Registers, SystemCall, is};
+use enigma::{ByteAddress, image::Image, Machine, Memory, Registers, SystemCall, is};
 use std::{
     fs::File,
     io::{self, Read},

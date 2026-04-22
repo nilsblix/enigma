@@ -258,7 +258,7 @@ ldw  reg r31 0
 
 ; fn literal()
 push_param_stack(r11)
-addi r11 4
+addi r11 r11 4
 next()
 ```
 
