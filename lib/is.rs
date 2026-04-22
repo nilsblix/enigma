@@ -3,9 +3,9 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Noop  = 0x00,
-    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
     // R types
-    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
     Add   = 0x01,
     Sub   = 0x02,
     Shl   = 0x03,
@@ -17,9 +17,9 @@ pub enum Op {
     Sltu  = 0x09,
     Eql   = 0x10,
     Debu  = 0x1F,
-    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
     // I types
-    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
     Sys   = 0x20,
     Addi  = 0x21,
     Subi  = 0x22,
@@ -77,30 +77,30 @@ impl Op {
             // I types
             ////////////////////////////////////////////////////////////////////
             Op::Sys   => "sys",
-            Op::Addi  => "add_i",
-            Op::Subi  => "sub_i",
-            Op::Shli  => "shl_i",
-            Op::Shri  => "shr_i",
-            Op::Ori   => "or_i",
-            Op::Orui  => "oru_i",
-            Op::Andi  => "and_i",
-            Op::Andui => "andu_i",
-            Op::Xori  => "xor_i",
-            Op::Xorui => "xoru_i",
-            Op::Slti  => "slt_i",
-            Op::Sltui => "sltu_i",
-            Op::Ldw   => "ldw_i",
-            Op::Ldhw  => "ldhw_i",
-            Op::Ldhwu => "ldhwu_i",
-            Op::Ldb   => "ldb_i",
-            Op::Ldbu  => "ldbu_i",
-            Op::Stw   => "stw_i",
-            Op::Sthw  => "sthw_i",
-            Op::Stb   => "stb_i",
-            Op::Jmp   => "jmp_i",
-            Op::Jmpr  => "jmpr_i",
-            Op::Beq   => "beq_i",
-            Op::Bne   => "bne_i",
+            Op::Addi  => "addi",
+            Op::Subi  => "subi",
+            Op::Shli  => "shli",
+            Op::Shri  => "shri",
+            Op::Ori   => "ori",
+            Op::Orui  => "orui",
+            Op::Andi  => "andi",
+            Op::Andui => "andui",
+            Op::Xori  => "xori",
+            Op::Xorui => "xorui",
+            Op::Slti  => "slti",
+            Op::Sltui => "sltui",
+            Op::Ldw   => "ldw",
+            Op::Ldhw  => "ldhw",
+            Op::Ldhwu => "ldhwu",
+            Op::Ldb   => "ldb",
+            Op::Ldbu  => "ldbu",
+            Op::Stw   => "stw",
+            Op::Sthw  => "sthw",
+            Op::Stb   => "stb",
+            Op::Jmp   => "jmp",
+            Op::Jmpr  => "jmpr",
+            Op::Beq   => "beq",
+            Op::Bne   => "bne",
         }
     }
 

@@ -8,5 +8,5 @@ path = "lib/enigma.rs"
 name = "enigma"
 
 [[bin]]
-name = "enigmavm"
-path = "enigmavm.rs"
+name = "enigmacli"
+path = "enigmacli.rs"

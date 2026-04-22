@@ -62,8 +62,8 @@ const STDOUT_FD: u16 = 1;
 const STDERR_FD: u16 = 2;
 
 fn attach_os_to_machine(m: &mut Machine) {
-    _ = m.attach_system_call(SYSCALL_READ_FROM_FD as u32, ReadFromFd {});
     _ = m.attach_system_call(SYSCALL_WRITE_TO_FD as u32, WriteToFd {});
+    _ = m.attach_system_call(SYSCALL_READ_FROM_FD as u32, ReadFromFd {});
 }
 
 fn build_from_bytecode(bytecode: &[u8]) -> Machine {
@@ -74,15 +74,12 @@ fn build_from_bytecode(bytecode: &[u8]) -> Machine {
 }
 
 fn usage() -> ! {
-    println!("Usage: evm file_path");
+    println!("Usage: evm [run-image | run-asm | emit-image] file_path");
     std::process::exit(1);
 }
 
-fn main() {
-    let mut args = std::env::args();
-    _ = args.next();
-
-    let bytecode_path = match args.next() {
+fn open_next_file(args: &mut std::env::Args) -> std::fs::File {
+    let file_path = match args.next() {
         Some(p) => p,
         None => {
             eprintln!("error: no path to bytecode was given.");
@@ -90,24 +87,31 @@ fn main() {
         }
     };
 
-    let path = std::path::Path::new(bytecode_path.as_str());
-    let mut f = match std::fs::File::open(path) {
-        Ok(b) => b,
+    let path = std::path::Path::new(file_path.as_str());
+    match std::fs::File::open(path) {
+        Ok(f) => f,
         Err(_) => {
-            eprintln!("error: file {bytecode_path} doesn't exist.");
+            eprintln!("error: file {file_path} doesn't exist.");
             usage();
         }
-    };
+    }
+}
 
-    let mut bytecode = Vec::new();
-    _ = match f.read_to_end(&mut bytecode) {
+fn read_all_from_next_file(args: &mut std::env::Args) -> Vec<u8> {
+    let mut f = open_next_file(args);
+    let mut s = Vec::new();
+    _ = match f.read_to_end(&mut s) {
         Ok(i) => i,
         Err(e) => {
             eprintln!("error: io error: {}", e);
             std::process::exit(1);
         }
     };
+    s
+}
 
+fn run_image(args: &mut std::env::Args) {
+    let bytecode = read_all_from_next_file(args);
     let mut m = build_from_bytecode(bytecode.as_slice());
     match m.exec_while_not_halt() {
         Ok(_) => {}
@@ -116,4 +120,92 @@ fn main() {
             std::process::exit(1);
         }
     };
+}
+
+fn run_asm(args: &mut std::env::Args) {
+    let bytes = read_all_from_next_file(args);
+    let src = match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("utf8 error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let img = match enigma::asm::assemble_str(src.as_str()) {
+        Ok(i) => i,
+        Err(ds) => {
+            println!("{ds}");
+            std::process::exit(1);
+        },
+    };
+    let mut m = img.consume_to_machine();
+    attach_os_to_machine(&mut m);
+    match m.exec_while_not_halt() {
+        Ok(_) => {}
+        Err(is::InstructionError::InvalidOperation { opcode }) => {
+            eprintln!("error: found invalid opcode: {opcode}.");
+            std::process::exit(1);
+        }
+    };
+}
+
+fn emit_image(args: &mut std::env::Args) {
+    let bytes = read_all_from_next_file(args);
+    let src = match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("utf8 error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let img = match enigma::asm::assemble_str(src.as_str()) {
+        Ok(i) => i,
+        Err(ds) => {
+            println!("{ds}");
+            std::process::exit(1);
+        },
+    };
+
+    let out_path = match args.next() {
+        Some(p) => p,
+        None => {
+            eprintln!("error: no path to bytecode was given.");
+            usage();
+        }
+    };
+
+    let path = std::path::Path::new(out_path.as_str());
+    let mut out_file = match std::fs::File::create_new(path) {
+        Ok(f) => f,
+        Err(_) => {
+            eprintln!("error: file {out_path} doesn't exist.");
+            usage();
+        }
+    };
+
+    img.dump_chunks(&mut out_file);
+}
+
+fn main() {
+    let mut args = std::env::args();
+    _ = args.next();
+
+    let program = match args.next() {
+        Some(p) => p,
+        None => {
+            eprintln!("error: no program was specified.");
+            usage();
+        },
+    };
+
+    match program.as_str() {
+        "run-image" => run_image(&mut args),
+        "run-asm" => run_asm(&mut args),
+        "emit-image" => emit_image(&mut args),
+        f => {
+            eprintln!("unknown program: '{}'", f);
+            usage();
+        },
+    }
+
 }

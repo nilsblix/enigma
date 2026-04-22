@@ -78,10 +78,9 @@ All instructions are 32-bit words.
 
 - R-type: `add`, `sub`, `shl`, `shr`, `or`, `and`, `xor`, `slt`, `sltu`, `eql`,
   `deb`.
-- I-type: `sys`, `add_i`, `sub_i`, `shl_i`, `shr_i`, `or_i`, `oru_i`, `and_i`,
-  `andu_i`, `xor_i`, `xoru_i`, `slt_i`, `sltu_i`, `ldw_i`, `ldhw_i`, `ldhwu_i`,
-  `ldb_i`, `ldbu_i`, `stw_i`, `sthw_i`, `stb_i`, `jmp_i`, `jmpr_i`, `beq_i`,
-  `bne_i`.
+- I-type: `sys`, `addi`, `subi`, `shli`, `shri`, `ori`, `orui`, `andi`,
+  `andui`, `xori`, `xorui`, `slti`, `sltui`, `ldw`, `ldhw`, `ldhwu`, `ldb`,
+  `ldbu`, `stw`, `sthw`, `stb`, `jmp`, `jmpr`, `beq`, `bne`.
 
 Notes:
 

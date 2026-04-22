@@ -103,6 +103,12 @@ impl Image {
         m
     }
 
+    pub fn consume_to_machine(self) -> Machine {
+        let mut m = Machine::new();
+        m.mem = self.mem;
+        m
+    }
+
     pub fn write_byte(&mut self, addr: ByteAddress, data: u8) {
         self.mem.write_raw_byte(addr, data);
     }
