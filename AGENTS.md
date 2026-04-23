@@ -1,28 +1,34 @@
 # Agent Development Guide
 
-A file for guiding coding agents.
+Short guidance for coding agents working in this repository.
 
 ## Commands
 
-- **Build**: `cargo build`
-    - Separate projects:
-    - **enigmavm** (EVM): `cargo build --bin enigmavm`
-    - **enigmaforth**: `cargo build --bin enigmaforth`
-- **Test**: `cargo test`
-- **Formatting**: `cargo fmt`
+- Build: `cargo build`
+- Test: `cargo test`
+- Format: `cargo fmt`
+- Run the CLI: `cargo run --bin enigmacli -q -- <subcommand> ...`
 
-## Structure
+Useful CLI subcommands:
 
-This project contains libraries and binaries.
+- `run-image <file.evm>`
+- `run-asm <file.esm>`
+- `emit-image <file.esm> [out.evm]`
 
-`enigmalib.rs` is a single-file Rust library to construct and load a custom
-32-bit Virtual Machine.
+## Project Layout
 
-`enigmavm.rs` is a single-file Virtual Machine using **enigmalib**. This
-implementation of the EVM (Enigma Virtual Machine) currently expects a
-**Posix** compatible host due to systemcalls being dependant on common **libc**
-functions.
+- `lib/`: core library code for the VM, instruction set, image handling, and
+  assembler support
+- `enigmacli.rs`: CLI entry point and host-side syscall wiring
+- `hello.esm`: small assembly example for quick end-to-end checks
+- `notes/`: design notes and plans; treat these as intent, not source of truth
 
-`enigmaforth.rs` is a single-file Forth compiler which emits an EVM image (with
-a `.evm` extension). It uses **jonesforth** as its main inspiration for key
-implementation details.
+## Working Rules
+
+- Prefer the current Rust code and `Cargo.toml` over older notes when they
+  disagree.
+- Keep changes aligned with the current public behavior of the CLI and library.
+- When changing assembler or image behavior, verify it with a focused test or a
+  `run-asm` check.
+- Prefer small, targeted changes over broad rewrites unless the task requires
+  them.
