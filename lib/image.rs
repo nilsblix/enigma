@@ -1,9 +1,10 @@
-use std::io::{self, Read, Write};
+use std::{fmt, error::Error, io::{self, Read, Write}};
 
 use super::{
     BLOCK_SIZE,
     Block,
     ByteAddress,
+    ByteOffset,
     Instruction,
     Machine,
     Memory,
@@ -131,5 +132,135 @@ impl Image {
             self.write_word(addr, instruction.encode());
             addr = addr.next_word().0;
         }
+    }
+}
+
+/// An opinionated builder of images. The builder makes assumptions concerning
+/// the layout of the built machine's memory sections, ex: this struct contains
+/// methods concerning text section and data section.
+pub struct ImageBuilder {
+    img: Image,
+    text_head: ByteAddress,
+    data_head: ByteAddress,
+
+    data_start_addr: ByteAddress,
+    /// The maximum amount of bytes stored in the data section.
+    data_max_size: u32,
+}
+
+#[derive(Debug)]
+pub enum BuilderError {
+    TextOverflow,
+    DataOverflow,
+}
+
+impl fmt::Display for BuilderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BuilderError::TextOverflow => write!(f, "text-section overflow"),
+            BuilderError::DataOverflow => write!(f, "data-section overflow"),
+        }
+    }
+}
+
+impl Error for BuilderError {}
+
+impl ImageBuilder {
+    pub fn new() -> ImageBuilder {
+        ImageBuilder {
+            img: Image::new(),
+            text_head: ByteAddress::ZERO,
+            data_head: ByteAddress::ZERO,
+            data_start_addr: ByteAddress(0x10000000),
+            data_max_size: 0x10000000,
+        }
+    }
+
+    pub fn emit_image(self) -> Image {
+        self.img
+    }
+
+    pub fn write_text_word(&mut self, text: u32) -> Result<ByteAddress, BuilderError> {
+        if self.text_head.0 > self.data_start_addr.0 - 4 {
+            return Err(BuilderError::TextOverflow);
+        }
+        self.img.write_word(self.text_head, text);
+        let re = self.text_head;
+        self.text_head = self.text_head.overflowing_add_bytes(ByteOffset(4)).0;
+        Ok(re)
+    }
+
+    pub fn write_text_half_word(&mut self, text: u16) -> Result<ByteAddress, BuilderError> {
+        if self.text_head.0 > self.data_start_addr.0 - 2 {
+            return Err(BuilderError::TextOverflow);
+        }
+        self.img.write_half_word(self.text_head, text);
+        let re = self.text_head;
+        self.text_head = self.text_head.overflowing_add_bytes(ByteOffset(2)).0;
+        Ok(re)
+    }
+
+    pub fn write_text_byte(&mut self, text: u8) -> Result<ByteAddress, BuilderError> {
+        if self.text_head.0 > self.data_start_addr.0 - 1 {
+            return Err(BuilderError::TextOverflow);
+        }
+        self.img.write_byte(self.text_head, text);
+        let re = self.text_head;
+        self.text_head = self.text_head.overflowing_add_bytes(ByteOffset(1)).0;
+        Ok(re)
+    }
+
+    pub fn write_text_bytes(&mut self, text: &[u8]) -> Result<ByteAddress, BuilderError> {
+        let len = text.len() as u32;
+        if self.text_head.0 > self.data_start_addr.0 - len {
+            return Err(BuilderError::TextOverflow);
+        }
+        self.img.write_bytes(self.text_head, text);
+        let re = self.text_head;
+        self.text_head = self.text_head
+            .overflowing_add_bytes(ByteOffset(len as i32)).0;
+        Ok(re)
+    }
+
+    pub fn write_data_word(&mut self, data: u32) -> Result<ByteAddress, BuilderError> {
+        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - 4 {
+            return Err(BuilderError::DataOverflow);
+        }
+        self.img.write_word(self.data_head, data);
+        let re = self.text_head;
+        self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(4)).0;
+        Ok(re)
+    }
+
+    pub fn write_data_half_word(&mut self, data: u16) -> Result<ByteAddress, BuilderError> {
+        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - 2 {
+            return Err(BuilderError::DataOverflow);
+        }
+        self.img.write_half_word(self.data_head, data);
+        let re = self.text_head;
+        self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(2)).0;
+        Ok(re)
+    }
+
+    pub fn write_data_byte(&mut self, data: u8) -> Result<ByteAddress, BuilderError> {
+        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - 1 {
+            return Err(BuilderError::DataOverflow);
+        }
+        self.img.write_byte(self.data_head, data);
+        let re = self.text_head;
+        self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(1)).0;
+        Ok(re)
+    }
+
+    pub fn write_data_bytes(&mut self, data: &[u8]) -> Result<ByteAddress, BuilderError> {
+        let len = data.len() as u32;
+        if self.data_head.0 > self.data_start_addr.0 - len {
+            return Err(BuilderError::DataOverflow);
+        }
+        self.img.write_bytes(self.data_head, data);
+        let re = self.text_head;
+        self.data_head = self.data_head
+            .overflowing_add_bytes(ByteOffset(len as i32)).0;
+        Ok(re)
     }
 }

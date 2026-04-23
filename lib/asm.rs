@@ -3,9 +3,8 @@ use std::fmt;
 use crate::{
     ByteAddress,
     Op,
-    WordOffset,
-    image::Image,
-    is::{self, Instruction}
+    image,
+    is::{self, Instruction},
 };
 
 #[derive(Debug, Clone)]
@@ -15,7 +14,6 @@ pub struct Diagnostic {
     col: usize,
 }
 
-
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}: error: {}", self.row, self.col, self.msg)
@@ -24,13 +22,13 @@ impl fmt::Display for Diagnostic {
 
 #[derive(Debug, Clone)]
 pub struct Diagnostics {
-    diags: Vec<Diagnostic>,
+    pub diags: Vec<Diagnostic>,
 }
 
 impl fmt::Display for Diagnostics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for diag in self.diags.iter() {
-            write!(f, "{diag}")?;
+            writeln!(f, "{diag}")?;
         }
         Ok(())
     }
@@ -38,65 +36,98 @@ impl fmt::Display for Diagnostics {
 
 impl std::error::Error for Diagnostics {}
 
-struct Lexer<'a> {
-    src: &'a str,
-    idents: Vec<(usize, &'a str)>,
+pub fn assemble_str(src: &str) -> Result<image::Image, Diagnostics> {
+    let assembler = Assembler::new(src);
+    assembler.assemble_until_end()
+}
+
+type Span = (usize, usize);
+
+#[rustfmt::skip]
+#[derive(Debug, PartialEq)]
+enum Token<'a> {
+    String   { span: Span, raw: &'a str },
+    Ident    { span: Span, raw: &'a str },
+}
+
+impl Token<'_> {
+    fn tag(&self) -> String {
+        match self {
+            Token::String   { span: _, raw } => format!("string \"{}\"", raw),
+            Token::Ident    { span: _, raw } => format!("identifier `{}`", raw),
+        }
+    }
+
+    fn source_pos(&self) -> usize {
+        match self {
+            Token::String     { span, raw: _ }
+            | Token::Ident    { span, raw: _ } => span.0,
+        }
+    }
+}
+
+struct Lexer<'src> {
+    toks: Vec<Token<'src>>,
 }
 
 impl<'a> Lexer<'a> {
     fn new(src: &'a str) -> Lexer<'a> {
-        let mut idents = vec![];
-        let mut start = None;
+        let mut toks = vec![];
+        let mut chars = src.char_indices().peekable();
 
-        for (i, c) in src.char_indices() {
-            if start.is_none() && !c.is_whitespace() {
-                start = Some(i);
+        while let Some((start, ch)) = chars.next() {
+            if ch.is_whitespace() {
                 continue;
             }
 
-            if let Some(st) = start {
-                if c.is_whitespace() {
-                    idents.push((st, &src[st..i]));
-                    start = None;
+            if ch == ';' {
+                for (_, next) in chars.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
                 }
+                continue;
             }
-        }
 
-        if let Some(st) = start {
-            idents.push((st, &src[st..]));
-        }
+            if ch == '"' {
+                let mut end = src.len();
 
-        Lexer { src, idents }
-    }
+                for (i, next) in chars.by_ref() {
+                    if next == '"' {
+                        end = i + next.len_utf8();
+                        break;
+                    }
+                }
 
-    fn lines(&self) -> Vec<Vec<(usize, &str)>> {
-        let mut lines = vec![];
-        let mut i = 0;
+                toks.push(Token::String{
+                    span: (start, end),
+                    raw: &src[start + 1..end - 1],
+                });
+                continue;
+            }
 
-        while i < self.idents.len() {
-            let start = self.idents[i];
-            let (row, _) = idx_to_row_col(self.src, start.0);
+            let mut end = src.len();
 
-            let mut line = vec![start];
-            let mut next_i = i + 1;
-
-            while next_i < self.idents.len() {
-                let other = self.idents[next_i];
-                let (other_row, _) = idx_to_row_col(self.src, other.0);
-
-                if other_row != row {
+            while let Some(&(i, next)) = chars.peek() {
+                if next.is_whitespace() || next == ';' {
+                    end = i;
                     break;
                 }
 
-                line.push(other);
-                next_i += 1;
+                if next == '"' {
+                    break;
+                }
+
+                chars.next();
             }
 
-            lines.push(line);
-            i = next_i;
+            toks.push(Token::Ident {
+                span: (start, end),
+                raw: &src[start..end],
+            });
         }
 
-        lines
+        Lexer { toks }
     }
 }
 
@@ -117,50 +148,209 @@ fn idx_to_row_col(src: &str, idx: usize) -> (usize, usize) {
     (r, c)
 }
 
-pub fn assemble_str(src: &str) -> Result<Image, Diagnostics> {
-    let mut img = Image::new();
-    let mut ptr = ByteAddress::ZERO;
+struct Assembler<'s> {
+    src: &'s str,
+    lexer: Lexer<'s>,
+    cursor: usize,
 
-    let mut diags = vec![];
-    let lexer = Lexer::new(src);
-    let lines = lexer.lines();
+    ptrs: Vec<(&'s str, ByteAddress)>,
+    builder: image::ImageBuilder,
 
-    for line in lines {
-        // We are guaranteed that each line has at least one identifier.
-        let first = line.first().unwrap();
-        let mn = match match_mneumonic(first.1) {
+    diags: Vec<Diagnostic>,
+}
+
+impl<'s> Assembler<'s> {
+    fn new(src: &str) -> Assembler {
+        Assembler {
+            src,
+            lexer: Lexer::new(src),
+            cursor: 0,
+            ptrs: Vec::new(),
+            builder: image::ImageBuilder::new(),
+            diags: vec![],
+        }
+    }
+
+    fn assemble_until_end(mut self) -> Result<image::Image, Diagnostics> {
+        while self.cursor < self.lexer.toks.len() {
+            let tok = &self.lexer.toks[self.cursor];
+
+            self.cursor += 1;
+            match tok {
+                Token::String {span: (st, _), raw: _} => {
+                    let msg = format!(
+                        "unexpected token: {}",
+                        tok.tag());
+                    let (row, col) = idx_to_row_col(self.src, *st);
+                    self.diags.push(Diagnostic { msg, row, col });
+                },
+                Token::Ident { span, raw } =>
+                    self.assemble_ident(*span, raw),
+            }
+        }
+
+        if self.diags.len() != 0 {
+            Err(Diagnostics { diags: self.diags.clone() })
+        } else {
+            Ok(self.builder.emit_image())
+        }
+    }
+
+    fn assemble_ident(&mut self, span: Span, raw: &str) {
+        let mn = match find_mneumonic(raw) {
             Ok(m) => m,
             Err(msg) => {
-                let (row, col) = idx_to_row_col(src, first.0);
-                diags.push(Diagnostic { msg, row, col });
-                continue;
+                let (row, col) = self.pos(span.0);
+                self.diags.push(Diagnostic { msg, row, col });
+                return;
             },
         };
 
         match mn {
-            Mneumonic::Op(op) => match parse_from_op(op, first.0, &line[1..]) {
-                Ok(i) => {
-                    img.write_word(ptr, i.encode());
-                    ptr = ptr.overflowing_add_words(WordOffset(1)).0;
-                }
+            Mneumonic::Op(op) => match self.assemble_instruction(span, op) {
+                Ok(()) => {},
                 Err((pos, msg)) => {
-                    let (row, col) = idx_to_row_col(src, pos);
-                    diags.push(Diagnostic { msg, row, col });
-                }
+                    let (row, col) = self.pos(pos);
+                    self.diags.push(Diagnostic { msg, row, col });
+                    return;
+                },
             }
-            Mneumonic::Directive(Directive::Ascii) => {
-                todo!();
-            },
+            Mneumonic::Directive(di) => match self.assemble_directive(span, di) {
+                Ok(()) => {},
+                Err((pos, msg)) => {
+                    let (row, col) = self.pos(pos);
+                    self.diags.push(Diagnostic { msg, row, col });
+                    return;
+                },
+            }
         }
     }
 
-    if diags.len() != 0 {
-        Err(Diagnostics { diags })
-    } else {
-        Ok(img)
+    fn assemble_instruction(&mut self, span: Span, op: Op) -> Result<(), (usize, String)> {
+        let rest = &self.lexer.toks[self.cursor..];
+
+        let inst = match op {
+            Op::Noop => Instruction::NOOP,
+            ////////////////////////////////////////////////////////////////////////
+            // R types
+            ////////////////////////////////////////////////////////////////////////
+            Op::Add
+                | Op::Sub
+                | Op::Shl
+                | Op::Shr
+                | Op::Or
+                | Op::And
+                | Op::Xor
+                | Op::Slt
+                | Op::Sltu
+                | Op::Eql => {
+                    expect_token_count(op, rest, 3).map_err(|e| (span.0, e))?;
+                    let rr = parse_register_diag(&rest[0])?;
+                    let ra = parse_register_diag(&rest[1])?;
+                    let rb = parse_register_diag(&rest[2])?;
+                    self.cursor += 3;
+                    Instruction::r_type(op, rr, ra, rb)
+                }
+            Op::Debu => {
+                expect_token_count(op, rest, 1).map_err(|e| (span.0, e))?;
+                let rr = parse_register_diag(&rest[0])?;
+                self.cursor += 1;
+                is::debu(rr)
+            }
+            // /////////////////////////////////////////////////////////////////////
+            // // I types
+            // /////////////////////////////////////////////////////////////////////
+            Op::Sys => {
+                expect_token_count(op, rest, 0).map_err(|e| (span.0, e))?;
+                is::sys()
+            }
+            Op::Addi
+                | Op::Subi
+                | Op::Shli
+                | Op::Shri
+                | Op::Ori
+                | Op::Orui
+                | Op::Andi
+                | Op::Andui
+                | Op::Xori
+                | Op::Xorui
+                | Op::Slti
+                | Op::Sltui
+                | Op::Ldw
+                | Op::Ldhw
+                | Op::Ldhwu
+                | Op::Ldb
+                | Op::Ldbu
+                | Op::Stw
+                | Op::Sthw
+                | Op::Stb
+                | Op::Jmp
+                | Op::Jmpr
+                | Op::Beq
+                | Op::Bne => {
+                    expect_token_count(op, rest, 3).map_err(|e| (span.0, e))?;
+                    let rr = parse_register_diag(&rest[0])?;
+                    let ra = parse_register_diag(&rest[1])?;
+                    let imm = parse_u16(&rest[2]).ok_or((
+                            rest[2].source_pos(),
+                            format!("could not parse u16 immediate: {}", rest[2].tag())
+                    ))?;
+                    self.cursor += 3;
+
+                    Instruction::i_type(op, rr, ra, imm)
+                }
+        };
+
+        self.builder
+            .write_text_word(inst.encode())
+            .map_err(|e| (span.0, e.to_string()))?;
+        Ok(())
+    }
+
+    fn assemble_directive(
+        &mut self,
+        span: Span,
+        di: Directive
+    ) -> Result<(), (usize, String)> {
+        match di {
+            Directive::Ascii => {
+                let name = match &self.lexer.toks[self.cursor] {
+                    Token::Ident { span: _, raw } => *raw,
+                    t => return Err(
+                        (t.source_pos(), format!(
+                                "expected identifier after .ascii directive, found: {}",
+                                t.tag()))),
+                };
+                self.cursor += 1;
+
+                let string = match &self.lexer.toks[self.cursor] {
+                    Token::String { span: _, raw } => *raw,
+                    t => return Err(
+                        (t.source_pos(), format!(
+                                "expected string after .ascii directive + name, found: {}",
+                                t.tag()))),
+                };
+                self.cursor += 1;
+
+                let bytes = string.as_bytes();
+                let addr = self.builder
+                    .write_data_bytes(bytes)
+                    .map_err(|e| (span.0, e.to_string()))?;
+                self.ptrs.push((name, addr));
+
+                println!("self.ptrs: {:?}", self.ptrs);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn pos(&self, buf_idx: usize) -> (usize, usize) {
+        idx_to_row_col(self.src, buf_idx)
     }
 }
 
+#[derive(Debug)]
 enum Directive {
     Ascii,
 }
@@ -171,7 +361,7 @@ impl TryFrom<&str> for Directive {
     fn try_from(value: &str) -> Result<Directive, Self::Error> {
         match value {
             ".ascii" => Ok(Directive::Ascii),
-            s => Err(format!("unknown directive: '{}'", s))
+            s => Err(format!("unknown directive: '{}'", s)),
         }
     }
 }
@@ -181,7 +371,7 @@ enum Mneumonic {
     Directive(Directive),
 }
 
-fn match_mneumonic(ident: &str) -> Result<Mneumonic, String> {
+fn find_mneumonic(ident: &str) -> Result<Mneumonic, String> {
     if let Ok(op) = Op::try_from(ident) {
         return Ok(Mneumonic::Op(op));
     }
@@ -192,106 +382,40 @@ fn match_mneumonic(ident: &str) -> Result<Mneumonic, String> {
 
     let f = format!(
         "unknown mneumonic, expected either an instruction or a directive, found: {}",
-        ident);
+        ident
+    );
     Err(f)
 }
 
-fn expect_token_count(
-    op: Op,
-    rest: &[(usize, &str)],
-    count: usize,
-) -> Result<(), String> {
-    if rest.len() != count {
+fn expect_token_count(op: Op, rest: &[Token], count: usize) -> Result<(), String> {
+    if rest.len() < count {
         let f = format!(
-            "instruction '{}' expects {} registers, found: {}",
-            op.name(), count, rest.len());
+            "truncated token count. instruction '{}' expects {} registers, found: {}",
+            op.name(),
+            count,
+            rest.len()
+        );
         return Err(f);
     }
 
     Ok(())
 }
 
-fn parse_from_op(
-    op: Op,
-    pos: usize,
-    rest: &[(usize, &str)],
-) -> Result<Instruction, (usize, String)> {
-    match op {
-        Op::Noop => Ok(Instruction::NOOP),
-        ////////////////////////////////////////////////////////////////////////
-        // R types
-        ////////////////////////////////////////////////////////////////////////
-        Op::Add
-        | Op::Sub
-        | Op::Shl
-        | Op::Shr
-        | Op::Or
-        | Op::And
-        | Op::Xor
-        | Op::Slt
-        | Op::Sltu
-        | Op::Eql => {
-            expect_token_count(op, rest, 3).map_err(|e| (pos, e))?;
-            let rr = parse_register_diag(rest[0])?;
-            let ra = parse_register_diag(rest[1])?;
-            let rb = parse_register_diag(rest[2])?;
-            Ok(Instruction::r_type(op, rr, ra, rb))
-        }
-        Op::Debu => {
-            expect_token_count(op, rest, 1).map_err(|e| (pos, e))?;
-            let rr = parse_register_diag(rest[0])?;
-            Ok(is::debu(rr))
-        }
-        // /////////////////////////////////////////////////////////////////////
-        // // I types
-        // /////////////////////////////////////////////////////////////////////
-        Op::Sys => {
-            expect_token_count(op, rest, 0).map_err(|e| (pos, e))?;
-            Ok(is::sys())
-        }
-        Op::Addi
-        | Op::Subi
-        | Op::Shli
-        | Op::Shri
-        | Op::Ori
-        | Op::Orui
-        | Op::Andi
-        | Op::Andui
-        | Op::Xori
-        | Op::Xorui
-        | Op::Slti
-        | Op::Sltui
-        | Op::Ldw
-        | Op::Ldhw
-        | Op::Ldhwu
-        | Op::Ldb
-        | Op::Ldbu
-        | Op::Stw
-        | Op::Sthw
-        | Op::Stb
-        | Op::Jmp
-        | Op::Jmpr
-        | Op::Beq
-        | Op::Bne => {
-            expect_token_count(op, rest, 3).map_err(|e| (pos, e))?;
-            let rr = parse_register_diag(rest[0])?;
-            let ra = parse_register_diag(rest[1])?;
-            let imm = u16::from_str_radix(rest[2].1, 10).map_err(|_| {
-                let f = format!(
-                    "could not parse immediate as u16: '{}'", rest[2].1);
-                (rest[2].0, f)
-            })?;
-
-            Ok(Instruction::i_type(op, rr, ra, imm))
-        }
+fn parse_u16(tok: &Token) -> Option<u16> {
+    match tok {
+        Token::Ident { span: _, raw } => u16::from_str_radix(raw, 10).ok(),
+        _ => None,
     }
 }
 
-fn parse_register(reg: &str) -> Option<usize> {
-    reg.strip_prefix('r')?.parse().ok()
+fn parse_register(reg: &Token) -> Option<usize> {
+    match reg {
+        Token::Ident { span: _, raw } => raw.strip_prefix('r')?.parse().ok(),
+        _ => None,
+    }
 }
 
-fn parse_register_diag(reg: (usize, &str)) -> Result<usize, (usize, String)> {
-    parse_register(reg.1).ok_or(
-        (reg.0, format!("found unknown register: '{}", reg.1)))
+fn parse_register_diag(reg: &Token) -> Result<usize, (usize, String)> {
+    parse_register(reg).ok_or(
+        (reg.source_pos(), format!("found unknown register: '{}", reg.tag())))
 }
