@@ -115,6 +115,7 @@ fn read_all_from_next_file(args: &mut std::env::Args) -> (String, Vec<u8>) {
 }
 
 fn print_asm_diagnostics(path: &str, diags: &enigma::asm::Diagnostics<'_>) {
+    eprintln!("\x1b[1mcompilation failed\x1b[22m:\n");
     eprintln!("{}", diags.with_path(path));
 }
 
