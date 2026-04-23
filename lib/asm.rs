@@ -1,8 +1,9 @@
 use std::fmt;
 
 use crate::{
-    ByteAddress, Op, image,
+    image,
     is::{self, Instruction},
+    ByteAddress, Op,
 };
 
 #[derive(Debug, Clone)]
@@ -329,8 +330,8 @@ impl<'s> Assembler<'s> {
                 };
                 self.cursor += 1;
 
-                let string = match &self.lexer.toks[self.cursor] {
-                    Token::String { span: _, raw } => *raw,
+                let (string_pos, string) = match &self.lexer.toks[self.cursor] {
+                    Token::String { span, raw } => (span.0, *raw),
                     t => return Err((
                             t.source_pos(),
                             format!(
@@ -341,14 +342,13 @@ impl<'s> Assembler<'s> {
                 };
                 self.cursor += 1;
 
-                let bytes = string.as_bytes();
+                let bytes = decode_string_literal(string)
+                    .map_err(|(offset, msg)| (string_pos + 1 + offset, msg))?;
                 let addr = self
                     .builder
-                    .write_data_bytes(bytes)
+                    .write_data_bytes(bytes.as_slice())
                     .map_err(|e| (span.0, e.to_string()))?;
                 self.ptrs.push((name, addr));
-
-                println!("self.ptrs: {:?}", self.ptrs);
             }
             Directive::SetRegister => {
                 let reg = parse_register_diag(&self.lexer.toks[self.cursor])?;
@@ -392,13 +392,12 @@ impl<'s> Assembler<'s> {
         reg: usize,
         set: u32,
     ) -> Result<(), (usize, String)> {
-        let iss = [
-            is::xori(reg, 0, set as u16),
-            is::orui(reg, reg, (set >> 16) as u16),
-        ];
-        for i in iss {
+        self.builder
+            .write_text_word(is::xori(reg, 0, set as u16).encode())
+            .map_err(|e| (source_pos, e.to_string()))?;
+        if set > u16::MAX as u32 {
             self.builder
-                .write_text_word(i.encode())
+                .write_text_word(is::orui(reg, reg, (set >> 16) as u16).encode())
                 .map_err(|e| (source_pos, e.to_string()))?;
         }
         Ok(())
@@ -491,4 +490,88 @@ fn parse_register_diag(reg: &Token) -> Result<usize, (usize, String)> {
         reg.source_pos(),
         format!("found unknown register: '{}", reg.tag()),
     ))
+}
+
+fn decode_string_literal(raw: &str) -> Result<Vec<u8>, (usize, String)> {
+    let mut bytes = Vec::new();
+    let mut chars = raw.char_indices().peekable();
+
+    while let Some((idx, ch)) = chars.next() {
+        if ch != '\\' {
+            let mut buf = [0u8; 4];
+            bytes.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+            continue;
+        }
+
+        let Some((_, esc)) = chars.next() else {
+            return Err((idx, "unterminated escape sequence in string".to_string()));
+        };
+
+        match esc {
+            '\\' => bytes.push(b'\\'),
+            '"' => bytes.push(b'"'),
+            'n' => bytes.push(b'\n'),
+            'r' => bytes.push(b'\r'),
+            't' => bytes.push(b'\t'),
+            '0' => bytes.push(b'\0'),
+            'x' => {
+                let Some((_, hi)) = chars.next() else {
+                    return Err((idx, "expected two hex digits after \\x".to_string()));
+                };
+                let Some((_, lo)) = chars.next() else {
+                    return Err((idx, "expected two hex digits after \\x".to_string()));
+                };
+
+                let hi = hi
+                    .to_digit(16)
+                    .ok_or((idx, format!("invalid hex escape digit: '{}'", hi)))?;
+                let lo = lo
+                    .to_digit(16)
+                    .ok_or((idx, format!("invalid hex escape digit: '{}'", lo)))?;
+                bytes.push(((hi << 4) | lo) as u8);
+            }
+            other => return Err((idx, format!("unknown escape sequence: \\{}", other))),
+        }
+    }
+
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::assemble_str;
+    use crate::ByteAddress;
+
+    #[test]
+    fn ascii_and_setreg_use_data_pointer_and_decode_newline() {
+        let src = ".ascii hello \"Hello, Sailor!\\n\"\n.setreg r3 @hello\n.setreg r4 15\nnoop";
+        let image = assemble_str(src).expect("assembly should succeed");
+        let mut machine = image.consume_to_machine();
+
+        let mut buf = [0u8; 15];
+        for (i, byte) in buf.iter_mut().enumerate() {
+            *byte = machine.read_byte(ByteAddress(0x1000_0000 + i as u32));
+        }
+        assert_eq!(&buf, b"Hello, Sailor!\n");
+
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        assert_eq!(machine.read_register(3), 0x1000_0000);
+
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        assert_eq!(machine.read_register(4), 15);
+    }
+
+    #[test]
+    fn setreg_small_immediate_emits_one_instruction() {
+        let image = assemble_str(".setreg r4 15\nnoop").expect("assembly should succeed");
+        let mut machine = image.consume_to_machine();
+
+        machine.exec_and_advance().unwrap();
+        assert_eq!(machine.read_register(4), 15);
+
+        let second = machine.current_instruction().unwrap();
+        assert_eq!(second, crate::Instruction::NOOP);
+    }
 }

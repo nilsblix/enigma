@@ -48,7 +48,7 @@ fn encode_and_decode_instruction() {
     };
     let res = Instruction::decode(word).unwrap();
     assert_eq!(res, inst);
-    assert_eq!(res.op.name(), "sub_i");
+    assert_eq!(res.op.name(), "subi");
     assert_eq!(res.encode(), word);
 
     //          |  op | rr | ra |    immediate   |
@@ -64,7 +64,7 @@ fn encode_and_decode_instruction() {
     };
     let res = Instruction::decode(word).unwrap();
     assert_eq!(res, inst);
-    assert_eq!(res.op.name(), "jmp_i");
+    assert_eq!(res.op.name(), "jmp");
     assert_eq!(res.encode(), word);
 }
 

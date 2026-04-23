@@ -4,7 +4,7 @@ use std::{
     io::{self, Read, Write},
 };
 
-use super::{BLOCK_SIZE, Block, ByteAddress, ByteOffset, Instruction, Machine, Memory};
+use super::{Block, ByteAddress, ByteOffset, Instruction, Machine, Memory, BLOCK_SIZE};
 
 pub struct Image {
     mem: Memory,
@@ -163,11 +163,12 @@ impl Error for BuilderError {}
 
 impl ImageBuilder {
     pub fn new() -> ImageBuilder {
+        let data_start_addr = ByteAddress(0x10000000);
         ImageBuilder {
             img: Image::new(),
             text_head: ByteAddress::ZERO,
-            data_head: ByteAddress::ZERO,
-            data_start_addr: ByteAddress(0x10000000),
+            data_head: data_start_addr,
+            data_start_addr,
             data_max_size: 0x10000000,
         }
     }
@@ -225,7 +226,7 @@ impl ImageBuilder {
             return Err(BuilderError::DataOverflow);
         }
         self.img.write_word(self.data_head, data);
-        let re = self.text_head;
+        let re = self.data_head;
         self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(4)).0;
         Ok(re)
     }
@@ -235,7 +236,7 @@ impl ImageBuilder {
             return Err(BuilderError::DataOverflow);
         }
         self.img.write_half_word(self.data_head, data);
-        let re = self.text_head;
+        let re = self.data_head;
         self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(2)).0;
         Ok(re)
     }
@@ -245,18 +246,18 @@ impl ImageBuilder {
             return Err(BuilderError::DataOverflow);
         }
         self.img.write_byte(self.data_head, data);
-        let re = self.text_head;
+        let re = self.data_head;
         self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(1)).0;
         Ok(re)
     }
 
     pub fn write_data_bytes(&mut self, data: &[u8]) -> Result<ByteAddress, BuilderError> {
         let len = data.len() as u32;
-        if self.data_head.0 > self.data_start_addr.0 - len {
+        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - len {
             return Err(BuilderError::DataOverflow);
         }
         self.img.write_bytes(self.data_head, data);
-        let re = self.text_head;
+        let re = self.data_head;
         self.data_head = self
             .data_head
             .overflowing_add_bytes(ByteOffset(len as i32))

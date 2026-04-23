@@ -1,0 +1,9 @@
+.ascii quote "A long time ago in a galaxy far, far away...\n"
+
+.setreg r1 1        ; Syscall-nr for write-to-fd is 1.
+.setreg r2 1        ; Stdout fd is 1.
+.setreg r3 @quote   ; We grab the address to the quote buffer.
+.setreg r4 45       ; The quote is 35 bytes long.
+sys                 ; Invoke the syscall.
+
+jmp   r0 r0  0      ; Halt
