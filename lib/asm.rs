@@ -1,41 +1,51 @@
 use std::fmt;
 
 use crate::{
-    image,
+    ByteAddress, Op, image,
     is::{self, Instruction},
-    ByteAddress, Op,
 };
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
+    pos: usize,
     msg: String,
-    row: usize,
-    col: usize,
-}
-
-impl fmt::Display for Diagnostic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}: error: {}", self.row, self.col, self.msg)
-    }
 }
 
 #[derive(Debug, Clone)]
-pub struct Diagnostics {
+pub struct Diagnostics<'src> {
+    src: &'src str,
     pub diags: Vec<Diagnostic>,
 }
 
-impl fmt::Display for Diagnostics {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for diag in self.diags.iter() {
-            writeln!(f, "{diag}")?;
+pub struct DiagnosticsDisplay<'a, 'src> {
+    path: &'a str,
+    diagnostics: &'a Diagnostics<'src>,
+}
+
+impl<'src> Diagnostics<'src> {
+    pub fn with_path<'a>(&'a self, path: &'a str) -> DiagnosticsDisplay<'a, 'src> {
+        DiagnosticsDisplay {
+            path,
+            diagnostics: self,
         }
-        Ok(())
     }
 }
 
-impl std::error::Error for Diagnostics {}
+impl fmt::Display for Diagnostics<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_diagnostics(f, "<input>", self)
+    }
+}
 
-pub fn assemble_str(src: &str) -> Result<image::Image, Diagnostics> {
+impl fmt::Display for DiagnosticsDisplay<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_diagnostics(f, self.path, self.diagnostics)
+    }
+}
+
+impl std::error::Error for Diagnostics<'_> {}
+
+pub fn assemble_str<'src>(src: &'src str) -> Result<image::Image, Diagnostics<'src>> {
     let assembler = Assembler::new(src);
     assembler.assemble_until_end()
 }
@@ -43,7 +53,7 @@ pub fn assemble_str(src: &str) -> Result<image::Image, Diagnostics> {
 type Span = (usize, usize);
 
 #[rustfmt::skip]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum Token<'a> {
     String { span: Span, raw: &'a str },
     Ident  { span: Span, raw: &'a str },
@@ -59,10 +69,18 @@ impl Token<'_> {
     }
 
     #[rustfmt::skip]
-    fn source_pos(&self) -> usize {
+    fn logical_start(&self) -> usize {
         match self {
-            Token::String { span, raw: _ }
+            Token::String  { span, raw: _ }
             | Token::Ident { span, raw: _ } => span.0,
+        }
+    }
+
+    #[rustfmt::skip]
+    fn logical_end(&self) -> usize {
+        match self {
+            Token::String  { span, raw: _ }
+            | Token::Ident { span, raw: _ } => span.1,
         }
     }
 }
@@ -132,7 +150,8 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn idx_to_row_col(src: &str, idx: usize) -> (usize, usize) {
+fn logical_to_row_col(src: &str, idx: usize) -> (usize, usize) {
+    let idx = idx.min(src.len());
     let mut r = 1;
     let mut c = 1;
 
@@ -149,6 +168,38 @@ fn idx_to_row_col(src: &str, idx: usize) -> (usize, usize) {
     (r, c)
 }
 
+fn source_line_at(src: &str, idx: usize) -> &str {
+    let clamped = idx.min(src.len());
+    let start = src[..clamped].rfind('\n').map_or(0, |i| i + 1);
+    let end = src[clamped..].find('\n').map_or(src.len(), |i| clamped + i);
+    &src[start..end]
+}
+
+fn write_diagnostics(
+    f: &mut fmt::Formatter<'_>,
+    path: &str,
+    diagnostics: &Diagnostics<'_>,
+) -> fmt::Result {
+    for (idx, diag) in diagnostics.diags.iter().enumerate() {
+        let (row, col) = logical_to_row_col(diagnostics.src, diag.pos);
+        let line = source_line_at(diagnostics.src, diag.pos);
+        let gutter = " ".repeat(row.to_string().len());
+        let caret_pad = " ".repeat(col.saturating_sub(1));
+
+        writeln!(f, "--> {path}:{row}:{col}: error: {}", diag.msg)?;
+        writeln!(f, "{gutter} |")?;
+        writeln!(f, "{row} | {line}")?;
+
+        if idx == diagnostics.diags.len() - 1 {
+            write!(f, "{gutter} | {caret_pad}^")?;
+        } else {
+            writeln!(f, "{gutter} | {caret_pad}^\n")?;
+        }
+    }
+
+    Ok(())
+}
+
 struct Assembler<'s> {
     src: &'s str,
     lexer: Lexer<'s>,
@@ -161,7 +212,7 @@ struct Assembler<'s> {
 }
 
 impl<'s> Assembler<'s> {
-    fn new(src: &str) -> Assembler {
+    fn new(src: &'s str) -> Assembler<'s> {
         Assembler {
             src,
             lexer: Lexer::new(src),
@@ -172,7 +223,7 @@ impl<'s> Assembler<'s> {
         }
     }
 
-    fn assemble_until_end(mut self) -> Result<image::Image, Diagnostics> {
+    fn assemble_until_end(mut self) -> Result<image::Image, Diagnostics<'s>> {
         while self.cursor < self.lexer.toks.len() {
             let tok = &self.lexer.toks[self.cursor];
 
@@ -183,8 +234,7 @@ impl<'s> Assembler<'s> {
                     raw: _,
                 } => {
                     let msg = format!("unexpected token: {}", tok.tag());
-                    let (row, col) = idx_to_row_col(self.src, *st);
-                    self.diags.push(Diagnostic { msg, row, col });
+                    self.push_diag(*st, msg);
                 }
                 Token::Ident { span, raw } => self.assemble_ident(*span, raw),
             }
@@ -192,7 +242,8 @@ impl<'s> Assembler<'s> {
 
         if self.diags.len() != 0 {
             Err(Diagnostics {
-                diags: self.diags.clone(),
+                src: self.src,
+                diags: self.diags,
             })
         } else {
             Ok(self.builder.emit_image())
@@ -203,8 +254,7 @@ impl<'s> Assembler<'s> {
         let mn = match find_mneumonic(raw) {
             Ok(m) => m,
             Err(msg) => {
-                let (row, col) = self.pos(span.0);
-                self.diags.push(Diagnostic { msg, row, col });
+                self.push_diag(span.0, msg);
                 return;
             }
         };
@@ -213,16 +263,14 @@ impl<'s> Assembler<'s> {
             Mneumonic::Op(op) => match self.assemble_instruction(span, op) {
                 Ok(()) => {}
                 Err((pos, msg)) => {
-                    let (row, col) = self.pos(pos);
-                    self.diags.push(Diagnostic { msg, row, col });
+                    self.push_diag(pos, msg);
                     return;
                 }
             },
             Mneumonic::Directive(di) => match self.assemble_directive(span, di) {
                 Ok(()) => {}
                 Err((pos, msg)) => {
-                    let (row, col) = self.pos(pos);
-                    self.diags.push(Diagnostic { msg, row, col });
+                    self.push_diag(pos, msg);
                     return;
                 }
             },
@@ -295,7 +343,7 @@ impl<'s> Assembler<'s> {
                 let rr = parse_register_diag(&rest[0])?;
                 let ra = parse_register_diag(&rest[1])?;
                 let imm = parse_u16(&rest[2]).ok_or((
-                    rest[2].source_pos(),
+                    rest[2].logical_start(),
                     format!("could not parse u16 immediate: {}", rest[2].tag()),
                 ))?;
                 self.cursor += 3;
@@ -318,29 +366,30 @@ impl<'s> Assembler<'s> {
     ) -> Result<(), (usize, String)> {
         match di {
             Directive::Ascii => {
-                let name = match &self.lexer.toks[self.cursor] {
-                    Token::Ident { span: _, raw } => *raw,
+                let name_tok = self.next_token(span.1, "identifier after .ascii directive")?;
+                let name = match name_tok {
+                    Token::Ident { span: _, raw } => raw,
                     t => return Err((
-                            t.source_pos(),
+                            t.logical_start(),
                             format!(
                                 "expected identifier after .ascii directive, found: {}",
                                 t.tag()
                             ),
                         )),
                 };
-                self.cursor += 1;
 
-                let (string_pos, string) = match &self.lexer.toks[self.cursor] {
-                    Token::String { span, raw } => (span.0, *raw),
+                let string_tok =
+                    self.next_token(name_tok.logical_end(), "string after .ascii directive + name")?;
+                let (string_pos, string) = match string_tok {
+                    Token::String { span, raw } => (span.0, raw),
                     t => return Err((
-                            t.source_pos(),
+                            t.logical_start(),
                             format!(
                                 "expected string after .ascii directive + name, found: {}",
                                 t.tag()
                             ),
                         )),
                 };
-                self.cursor += 1;
 
                 let bytes = decode_string_literal(string)
                     .map_err(|(offset, msg)| (string_pos + 1 + offset, msg))?;
@@ -351,35 +400,37 @@ impl<'s> Assembler<'s> {
                 self.ptrs.push((name, addr));
             }
             Directive::SetRegister => {
-                let reg = parse_register_diag(&self.lexer.toks[self.cursor])?;
-                self.cursor += 1;
-                let set_tok = &self.lexer.toks[self.cursor];
+                let reg_tok = self.next_token(span.1, "register after .setreg directive")?;
+                let reg = parse_register_diag(&reg_tok)?;
+                let set_tok = self.next_token(
+                    reg_tok.logical_end(),
+                    "identifier or immediate after .setreg directive",
+                )?;
                 let set_str = match set_tok {
-                    Token::Ident { span: _, raw } => *raw,
+                    Token::Ident { span: _, raw } => raw,
                     t => return Err((
-                            t.source_pos(),
+                            t.logical_start(),
                             format!(
                                 "expected an identifier after .setreg directive, found: {}",
                                 t.tag()
                             ),
                         )),
                 };
-                self.cursor += 1;
                 if let Some(name) = set_str.strip_prefix("@") {
                     if let Some(ByteAddress(ptr)) = self.find_ptr_by_name(name) {
-                        self.append_is_for_setreg(set_tok.source_pos(), reg, ptr)?;
+                        self.append_is_for_setreg(set_tok.logical_start(), reg, ptr)?;
                         return Ok(());
                     }
 
                     return Err((
-                        set_tok.source_pos(),
+                        set_tok.logical_start(),
                         format!("unknown ptr '{}'", name),
                     ));
                 }
 
                 let set = u32::from_str_radix(set_str, 10)
-                    .map_err(|e| (set_tok.source_pos(), e.to_string()))?;
-                self.append_is_for_setreg(set_tok.source_pos(), reg, set)?;
+                    .map_err(|e| (set_tok.logical_start(), e.to_string()))?;
+                self.append_is_for_setreg(set_tok.logical_start(), reg, set)?;
             },
         }
 
@@ -413,8 +464,22 @@ impl<'s> Assembler<'s> {
         None
     }
 
-    fn pos(&self, buf_idx: usize) -> (usize, usize) {
-        idx_to_row_col(self.src, buf_idx)
+    fn next_token(
+        &mut self,
+        pos: usize,
+        expected: &'static str,
+    ) -> Result<Token<'s>, (usize, String)> {
+        let tok = *self
+            .lexer
+            .toks
+            .get(self.cursor)
+            .ok_or((pos, format!("expected {expected}, found end of input")))?;
+        self.cursor += 1;
+        Ok(tok)
+    }
+
+    fn push_diag(&mut self, pos: usize, msg: String) {
+        self.diags.push(Diagnostic { pos, msg });
     }
 }
 
@@ -487,7 +552,7 @@ fn parse_register(reg: &Token) -> Option<usize> {
 
 fn parse_register_diag(reg: &Token) -> Result<usize, (usize, String)> {
     parse_register(reg).ok_or((
-        reg.source_pos(),
+        reg.logical_start(),
         format!("found unknown register: '{}", reg.tag()),
     ))
 }
@@ -573,5 +638,37 @@ mod tests {
 
         let second = machine.current_instruction().unwrap();
         assert_eq!(second, crate::Instruction::NOOP);
+    }
+
+    #[test]
+    fn ascii_without_name_reports_diagnostic_instead_of_panicking() {
+        let err = match assemble_str(".ascii") {
+            Ok(_) => panic!("assembly should fail"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("--> <input>:1:7: error:"));
+        assert!(
+            rendered.contains("expected identifier after .ascii directive, found end of input")
+        );
+        assert!(rendered.contains("  |"));
+        assert!(rendered.contains("1 | .ascii"));
+        assert!(rendered.contains("  |       ^"));
+        assert!(rendered.contains(".ascii"));
+    }
+
+    #[test]
+    fn setreg_without_operands_reports_diagnostic_instead_of_panicking() {
+        let err = match assemble_str(".setreg") {
+            Ok(_) => panic!("assembly should fail"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("--> <input>:1:8: error:"));
+        assert!(rendered.contains("expected register after .setreg directive, found end of input"));
+        assert!(rendered.contains("1 | .setreg"));
+        assert!(rendered.contains("  |        ^"));
     }
 }

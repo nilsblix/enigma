@@ -114,6 +114,10 @@ fn read_all_from_next_file(args: &mut std::env::Args) -> (String, Vec<u8>) {
     (path, read_all_from_file(&mut f))
 }
 
+fn print_asm_diagnostics(path: &str, diags: &enigma::asm::Diagnostics<'_>) {
+    eprintln!("{}", diags.with_path(path));
+}
+
 fn run_image(args: &mut std::env::Args) {
     let (_, bytecode) = read_all_from_next_file(args);
     let mut m = build_from_bytecode(bytecode.as_slice());
@@ -138,9 +142,7 @@ fn run_asm(args: &mut std::env::Args) {
     let img = match enigma::asm::assemble_str(src.as_str()) {
         Ok(i) => i,
         Err(ds) => {
-            for d in ds.diags.iter() {
-                println!("{}:{}", file_path, d);
-            }
+            print_asm_diagnostics(file_path.as_str(), &ds);
             std::process::exit(1);
         }
     };
@@ -156,7 +158,7 @@ fn run_asm(args: &mut std::env::Args) {
 }
 
 fn emit_image(args: &mut std::env::Args) {
-    let (_, bytes) = read_all_from_next_file(args);
+    let (file_path, bytes) = read_all_from_next_file(args);
     let src = match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => {
@@ -167,7 +169,7 @@ fn emit_image(args: &mut std::env::Args) {
     let img = match enigma::asm::assemble_str(src.as_str()) {
         Ok(i) => i,
         Err(ds) => {
-            println!("{ds}");
+            print_asm_diagnostics(file_path.as_str(), &ds);
             std::process::exit(1);
         }
     };

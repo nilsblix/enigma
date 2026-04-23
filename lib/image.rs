@@ -4,7 +4,7 @@ use std::{
     io::{self, Read, Write},
 };
 
-use super::{Block, ByteAddress, ByteOffset, Instruction, Machine, Memory, BLOCK_SIZE};
+use super::{BLOCK_SIZE, Block, ByteAddress, ByteOffset, Instruction, Machine, Memory};
 
 pub struct Image {
     mem: Memory,
