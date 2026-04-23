@@ -273,8 +273,7 @@ impl Instruction {
     /// their data, which means that the data acts like bit-padding.
     pub fn decode(word: u32) -> Result<Instruction, InstructionError> {
         let opcode = ((word >> Instruction::OPCODE_OFFSET) & OPCODE_MASK) as u8;
-        let op =
-            Op::try_from(opcode).map_err(|_| InstructionError::InvalidOperation { opcode })?;
+        let op = Op::try_from(opcode).map_err(|_| InstructionError::InvalidOperation { opcode })?;
         let payload = match op.encoding() {
             Encoding::Noop => Payload::Noop,
             Encoding::R => {

@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use enigma::{ByteAddress, image::Image, Machine, Memory, Registers, SystemCall, is};
+use enigma::{ByteAddress, Machine, Memory, Registers, SystemCall, image::Image, is};
 use std::{
     fs::File,
     io::{self, Read},
@@ -78,7 +78,7 @@ fn usage() -> ! {
     std::process::exit(1);
 }
 
-fn open_next_file(args: &mut std::env::Args) -> std::fs::File {
+fn open_next_file(args: &mut std::env::Args) -> (String, std::fs::File) {
     let file_path = match args.next() {
         Some(p) => p,
         None => {
@@ -89,7 +89,7 @@ fn open_next_file(args: &mut std::env::Args) -> std::fs::File {
 
     let path = std::path::Path::new(file_path.as_str());
     match std::fs::File::open(path) {
-        Ok(f) => f,
+        Ok(f) => (file_path, f),
         Err(_) => {
             eprintln!("error: file {file_path} doesn't exist.");
             usage();
@@ -97,8 +97,7 @@ fn open_next_file(args: &mut std::env::Args) -> std::fs::File {
     }
 }
 
-fn read_all_from_next_file(args: &mut std::env::Args) -> Vec<u8> {
-    let mut f = open_next_file(args);
+fn read_all_from_file(f: &mut std::fs::File) -> Vec<u8> {
     let mut s = Vec::new();
     _ = match f.read_to_end(&mut s) {
         Ok(i) => i,
@@ -110,8 +109,13 @@ fn read_all_from_next_file(args: &mut std::env::Args) -> Vec<u8> {
     s
 }
 
+fn read_all_from_next_file(args: &mut std::env::Args) -> (String, Vec<u8>) {
+    let (path, mut f) = open_next_file(args);
+    (path, read_all_from_file(&mut f))
+}
+
 fn run_image(args: &mut std::env::Args) {
-    let bytecode = read_all_from_next_file(args);
+    let (_, bytecode) = read_all_from_next_file(args);
     let mut m = build_from_bytecode(bytecode.as_slice());
     match m.exec_while_not_halt() {
         Ok(_) => {}
@@ -123,7 +127,7 @@ fn run_image(args: &mut std::env::Args) {
 }
 
 fn run_asm(args: &mut std::env::Args) {
-    let bytes = read_all_from_next_file(args);
+    let (file_path, bytes) = read_all_from_next_file(args);
     let src = match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => {
@@ -134,9 +138,11 @@ fn run_asm(args: &mut std::env::Args) {
     let img = match enigma::asm::assemble_str(src.as_str()) {
         Ok(i) => i,
         Err(ds) => {
-            println!("{ds}");
+            for d in ds.diags.iter() {
+                println!("{}:{}", file_path, d);
+            }
             std::process::exit(1);
-        },
+        }
     };
     let mut m = img.consume_to_machine();
     attach_os_to_machine(&mut m);
@@ -150,7 +156,7 @@ fn run_asm(args: &mut std::env::Args) {
 }
 
 fn emit_image(args: &mut std::env::Args) {
-    let bytes = read_all_from_next_file(args);
+    let (_, bytes) = read_all_from_next_file(args);
     let src = match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => {
@@ -163,13 +169,13 @@ fn emit_image(args: &mut std::env::Args) {
         Err(ds) => {
             println!("{ds}");
             std::process::exit(1);
-        },
+        }
     };
 
     let out_path = match args.next() {
         Some(p) => p,
         None => {
-            eprintln!("error: no path to bytecode was given.");
+            eprintln!("error: no out path was given.");
             usage();
         }
     };
@@ -178,7 +184,7 @@ fn emit_image(args: &mut std::env::Args) {
     let mut out_file = match std::fs::File::create_new(path) {
         Ok(f) => f,
         Err(_) => {
-            eprintln!("error: file {out_path} doesn't exist.");
+            eprintln!("error: file {out_path} already exists:");
             usage();
         }
     };
@@ -195,7 +201,7 @@ fn main() {
         None => {
             eprintln!("error: no program was specified.");
             usage();
-        },
+        }
     };
 
     match program.as_str() {
@@ -205,7 +211,6 @@ fn main() {
         f => {
             eprintln!("unknown program: '{}'", f);
             usage();
-        },
+        }
     }
-
 }

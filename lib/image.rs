@@ -1,14 +1,10 @@
-use std::{fmt, error::Error, io::{self, Read, Write}};
-
-use super::{
-    BLOCK_SIZE,
-    Block,
-    ByteAddress,
-    ByteOffset,
-    Instruction,
-    Machine,
-    Memory,
+use std::{
+    error::Error,
+    fmt,
+    io::{self, Read, Write},
 };
+
+use super::{BLOCK_SIZE, Block, ByteAddress, ByteOffset, Instruction, Machine, Memory};
 
 pub struct Image {
     mem: Memory,
@@ -217,8 +213,10 @@ impl ImageBuilder {
         }
         self.img.write_bytes(self.text_head, text);
         let re = self.text_head;
-        self.text_head = self.text_head
-            .overflowing_add_bytes(ByteOffset(len as i32)).0;
+        self.text_head = self
+            .text_head
+            .overflowing_add_bytes(ByteOffset(len as i32))
+            .0;
         Ok(re)
     }
 
@@ -259,8 +257,10 @@ impl ImageBuilder {
         }
         self.img.write_bytes(self.data_head, data);
         let re = self.text_head;
-        self.data_head = self.data_head
-            .overflowing_add_bytes(ByteOffset(len as i32)).0;
+        self.data_head = self
+            .data_head
+            .overflowing_add_bytes(ByteOffset(len as i32))
+            .0;
         Ok(re)
     }
 }

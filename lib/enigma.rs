@@ -853,6 +853,5 @@ impl Machine {
     }
 }
 
-
 #[cfg(test)]
 mod tests;
