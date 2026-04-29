@@ -204,7 +204,7 @@ pub enum Payload {
 impl Payload {
     pub fn encode(&self) -> u32 {
         match self {
-            Payload::Noop => 0x00000000,
+            Payload::Noop => 0x0000_0000,
             Payload::R { rr, ra, rb } => {
                 ((*rr as u32) << 21) | ((*ra as u32) << 16) | ((*rb as u32) << 11)
             }
@@ -221,9 +221,9 @@ pub struct Instruction {
     pub payload: Payload,
 }
 
-pub const REGISTER_MASK: u32 = 0b11111;
-pub const OPCODE_MASK: u32 = 0b111111;
-pub const IMMEDIATE_MASK: u32 = 0xFFFF;
+pub const REGISTER_MASK: u32 = 0b0001_1111;
+pub const OPCODE_MASK: u32 = 0b0011_1111;
+pub const IMMEDIATE_MASK: u32 = 0x0000_FFFF;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstructionError {

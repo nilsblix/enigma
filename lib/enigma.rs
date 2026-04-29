@@ -174,7 +174,7 @@ impl ByteAddress {
     }
 
     pub fn next_block(self) -> Option<ByteAddress> {
-        let aligned = self.0 & 0xFFFF0000;
+        let aligned = self.0 & 0xFFFF_0000;
         aligned.checked_add(BLOCK_SIZE as u32).map(ByteAddress)
     }
 
@@ -740,8 +740,8 @@ impl Machine {
             Op::Subi => Some(r_a.wrapping_sub(imm as u32)),
             Op::Shli => Some(r_a << (imm & Self::SHIFT_MASK as u16)),
             Op::Shri => Some(r_a >> (imm & Self::SHIFT_MASK as u16)),
-            Op::Andi => Some(r_a & (imm as u32 | 0xFFFF0000)),
-            Op::Andui => Some(r_a & ((imm as u32) << 16) | 0x0000FFFF),
+            Op::Andi => Some(r_a & (imm as u32 | 0xFFFF_0000)),
+            Op::Andui => Some(r_a & ((imm as u32) << 16) | 0x0000_FFFF),
             Op::Ori => Some(r_a | (imm as u32)),
             Op::Orui => Some(r_a | ((imm as u32) << 16)),
             Op::Xori => Some(r_a ^ (imm as u32)),

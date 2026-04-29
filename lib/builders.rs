@@ -4,7 +4,7 @@ use crate::{
 };
 
 pub fn recommended_stack_pointer() -> ByteAddress {
-    ByteAddress(0xEFFFFFFC)
+    ByteAddress(0xEFFF_FFFC)
 }
 
 pub fn recommended_stack_register() -> usize {
@@ -12,7 +12,7 @@ pub fn recommended_stack_register() -> usize {
 }
 
 pub fn recommended_io_address() -> ByteAddress {
-    ByteAddress(0xF0000000)
+    ByteAddress(0xF000_0000)
 }
 
 /// A segment-oriented memory builder.

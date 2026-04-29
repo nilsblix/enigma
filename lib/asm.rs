@@ -108,7 +108,7 @@ impl fmt::Display for DiagnosticsDisplay<'_, '_> {
 
 impl std::error::Error for Diagnostics<'_> {}
 
-pub fn assemble_str<'src>(src: &'src str) -> Result<image::Image, Diagnostics<'src>> {
+pub fn assemble_str(src: &str) -> Result<image::Image, Diagnostics> {
     let assembler = Assembler::new(src);
     assembler.assemble_until_end()
 }
@@ -354,10 +354,7 @@ impl<'s> Assembler<'s> {
             self.cursor += 1;
 
             match tok {
-                Token::String {
-                    span: (st, _),
-                    raw: _,
-                } => {
+                Token::String { span: (st, _), raw: _, } => {
                     self.push_diag(
                         st,
                         AsmError::UnexpectedToken {

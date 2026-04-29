@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use enigma::{
     ByteAddress, Machine, Memory, Registers, SystemCall, builders::MachineBuilder, image::Image, is,
 };
@@ -58,10 +56,6 @@ impl SystemCall for WriteToFd {
 
 const SYSCALL_READ_FROM_FD: u16 = 0;
 const SYSCALL_WRITE_TO_FD: u16 = 1;
-
-const STDIN_FD: u16 = 0;
-const STDOUT_FD: u16 = 1;
-const STDERR_FD: u16 = 2;
 
 fn attach_os_to_machine(builder: &mut MachineBuilder) {
     _ = builder.attach_system_call(SYSCALL_WRITE_TO_FD as u32, WriteToFd {});
@@ -195,7 +189,7 @@ fn emit_image(args: &mut std::env::Args) {
         }
     };
 
-    img.dump_chunks(&mut out_file);
+    let _ = img.dump_chunks(&mut out_file);
 }
 
 fn main() {
