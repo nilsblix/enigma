@@ -26,38 +26,42 @@ extension.
 
 - Comments start with `;`
 - Registers are `r0` through `r31`
-- Literals support decimal, `0x` hex, and character literals like `'A'`
-- Expressions support `+ - * / % << >> & | ^ ~` and current location `$`
-- Labels use `name:`
+- Literals support decimal and `0x` hex, with optional `_` separators
+- Constants use `.equ NAME VALUE`
+- Labels use `name:` and resolve to the current segment head
+
+### Segments
+
+Segments are compile-time layout ranges. They prevent assembler-time overlap and
+overflow, but do not provide runtime memory protection.
+
+```esm
+segment data from 0x1000_0000 to 0x2000_0000
+    quote:
+    .ascii "Hello, Sailor!\n"
+
+segment text from 0x0000_0000 to 0x1000_0000
+    .setreg r3 quote
+```
+
+Segment names are optional and non-semantic:
+
+```esm
+segment from 0x2000_0000 to 0x3000_0000
+    heap_start:
+    .space 0x1000
+    heap_end:
+```
 
 ### Directives
 
-- `.org expr`
-- `.align expr`
-- `.equ NAME, expr`
-- `.byte expr, ...`
-- `.half expr, ...`
-- `.word expr, ...`
-- `.ascii "text", ...`
-- `.asciz "text", ...`
-- `.space expr`
-- `.include "path"`
-- `.macro NAME arg1, arg2, ...`
-- `.endm`
+- `.equ NAME VALUE`
+- `.ascii "text"`
+- `.space BYTES`
+- `.setreg rN VALUE`
 
-### Macros
-
-Macros are line-oriented and expanded before parsing/encoding. Macro-local
-labels are supported by prefixing a label or symbol reference with `%%`.
-
-Example:
-
-```asm
-.macro load32 dst, value
-    xori dst, r0, value & 0xFFFF
-    orui dst, dst, (value >> 16) & 0xFFFF
-.endm
-```
+The assembler automatically appends a halt instruction after the last emitted
+instruction.
 
 ### Instructions
 
@@ -78,25 +82,22 @@ stw r3, [r31 + 4]
 ldb r4, [r5 - 1]
 ```
 
-`jmp` accepts `jmp target` or `jmp rr, target`. Branch and jump label operands
-are encoded as the VM's signed word-relative offsets.
+The low-level instruction syntax currently accepts the raw VM operand shape.
+I-type immediates may be decimal, hex, constants, or labels when the final value
+fits in `u16`.
 
 ## Current Scope
 
-Implemented in this pass:
+Implemented:
 
 - reusable assembler library module
-- `enigmaasm` binary
 - sparse-image emission into `.evm`
-- includes, macros, macro-local labels, expressions, labels, and data directives
+- segment-based layout, labels, constants, `.ascii`, `.space`, and `.setreg`
 - diagnostics with file/line/column rendering
-- unit tests for encoding, labels, macros, includes, diagnostics, and sparse
-  image round-trips
 
 Not implemented yet:
 
 - relocatable objects or a linker
 - conditional assembly
 - debug symbol outputs
-- migration of the existing `enigmaforth.rs` bootstrap off the Rust-side
-  `Putter` emitter
+- includes, macros, and expressions

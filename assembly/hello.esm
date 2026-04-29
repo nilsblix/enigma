@@ -1,9 +1,13 @@
-.ascii quote "A long time ago in a galaxy far, far away...\n"
+.equ SYSCALL_WRITE 1
+.equ STDOUT_FD 1
 
-.setreg r1 1        ; Syscall-nr for write-to-fd is 1.
-.setreg r2 1        ; Stdout fd is 1.
-.setreg r3 @quote   ; We grab the address to the quote buffer.
-.setreg r4 45       ; The quote is 35 bytes long.
-sys                 ; Invoke the syscall.
+segment data from 0x1000_0000 to 0x2000_0000
+    quote:
+    .ascii "A long time ago in a galaxy far, far away...\n"
 
-jmp   r0 r0  0      ; Halt
+segment text from 0x0000_0000 to 0x1000_0000
+    .setreg r1 SYSCALL_WRITE ; Syscall-nr for write-to-fd is 1.
+    .setreg r2 STDOUT_FD     ; Stdout fd is 1.
+    .setreg r3 quote         ; We grab the address to the quote buffer.
+    .setreg r4 45            ; The quote is 45 bytes long.
+    sys                      ; Invoke the syscall.

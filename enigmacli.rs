@@ -24,7 +24,7 @@ impl SystemCall for ReadFromFd {
 
         let mut f = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
         let mut buf = vec![0u8; count];
-        let bytes_read = (&mut *f).read(buf.as_mut_slice()).unwrap_or(0);
+        let bytes_read = (*f).read(buf.as_mut_slice()).unwrap_or(0);
 
         mem.write_raw_bytes(buf_addr, &buf[..bytes_read]);
         regs.write(1, bytes_read as u32);
@@ -48,8 +48,8 @@ impl SystemCall for WriteToFd {
         let mut f = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
         let mut buf = vec![0u8; count];
         mem.read_raw_bytes(buf_addr, buf.as_mut_slice());
-        _ = (&mut *f).write_all(buf.as_slice());
-        _ = (&mut *f).flush();
+        _ = (*f).write_all(buf.as_slice());
+        _ = (*f).flush();
         regs.write(1, count as u32);
     }
 }
@@ -74,7 +74,7 @@ fn build_from_bytecode(bytecode: &[u8]) -> Machine {
 }
 
 fn usage() -> ! {
-    println!("Usage: evm [run-image | run-asm | emit-image] file_path");
+    println!("Usage: evm [runimage | runasm | emit] file_path");
     std::process::exit(1);
 }
 
@@ -102,7 +102,7 @@ fn read_all_from_file(f: &mut std::fs::File) -> Vec<u8> {
     _ = match f.read_to_end(&mut s) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("error: io error: {}", e);
+            eprintln!("error: io error: {e}");
             std::process::exit(1);
         }
     };
@@ -136,7 +136,7 @@ fn run_asm(args: &mut std::env::Args) {
     let src = match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("utf8 error: {}", e);
+            eprintln!("utf8 error: {e}");
             std::process::exit(1);
         }
     };
@@ -163,7 +163,7 @@ fn emit_image(args: &mut std::env::Args) {
     let src = match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("utf8 error: {}", e);
+            eprintln!("utf8 error: {e}");
             std::process::exit(1);
         }
     };
@@ -208,11 +208,11 @@ fn main() {
     };
 
     match program.as_str() {
-        "run-image" => run_image(&mut args),
-        "run-asm" => run_asm(&mut args),
-        "emit-image" => emit_image(&mut args),
+        "runimage" => run_image(&mut args),
+        "runasm" => run_asm(&mut args),
+        "emit" => emit_image(&mut args),
         f => {
-            eprintln!("unknown program: '{}'", f);
+            eprintln!("unknown program: '{f}'");
             usage();
         }
     }

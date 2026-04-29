@@ -4,7 +4,7 @@ use std::{
     io::{self, Read, Write},
 };
 
-use super::{BLOCK_SIZE, Block, ByteAddress, ByteOffset, Instruction, Machine, Memory};
+use super::{BLOCK_SIZE, Block, ByteAddress, Instruction, Machine, Memory};
 
 pub struct Image {
     mem: Memory,
@@ -131,30 +131,97 @@ impl Image {
     }
 }
 
-/// An opinionated builder of images. The builder makes assumptions concerning
-/// the layout of the built machine's memory sections, ex: this struct contains
-/// methods concerning text section and data section.
+/// A segment-oriented image builder.
+///
+/// Segments are compile-time layout ranges. They constrain where sequential
+/// writes may be placed, but they do not imply any runtime memory protection.
 pub struct ImageBuilder {
     img: Image,
-    text_head: ByteAddress,
-    data_head: ByteAddress,
+    segments: Vec<Segment>,
+}
 
-    data_start_addr: ByteAddress,
-    /// The maximum amount of bytes stored in the data section.
-    data_max_size: u32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SegmentId(usize);
+
+struct Segment {
+    name: Option<String>,
+    start: ByteAddress,
+    end: ByteAddress,
+    head: ByteAddress,
 }
 
 #[derive(Debug)]
 pub enum BuilderError {
-    TextOverflow,
-    DataOverflow,
+    InvalidSegmentRange {
+        start: ByteAddress,
+        end: ByteAddress,
+    },
+    SegmentOverlap {
+        name: Option<String>,
+        start: ByteAddress,
+        end: ByteAddress,
+    },
+    UnknownSegment,
+    SegmentOverflow {
+        name: Option<String>,
+        head: ByteAddress,
+        len: u32,
+        end: ByteAddress,
+    },
+    AddressOverflow {
+        head: ByteAddress,
+        len: u32,
+    },
+    WriteTooLarge {
+        len: usize,
+    },
 }
 
 impl fmt::Display for BuilderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BuilderError::TextOverflow => write!(f, "text-section overflow"),
-            BuilderError::DataOverflow => write!(f, "data-section overflow"),
+            BuilderError::InvalidSegmentRange { start, end } => {
+                write!(
+                    f,
+                    "invalid segment range: {:#010x}..{:#010x}",
+                    start.0, end.0
+                )
+            }
+            BuilderError::SegmentOverlap { name, start, end } => {
+                write!(
+                    f,
+                    "segment{} overlaps existing segment: {:#010x}..{:#010x}",
+                    format_segment_name(name),
+                    start.0,
+                    end.0
+                )
+            }
+            BuilderError::UnknownSegment => write!(f, "unknown segment"),
+            BuilderError::SegmentOverflow {
+                name,
+                head,
+                len,
+                end,
+            } => {
+                write!(
+                    f,
+                    "segment{} overflow: write of {} bytes at {:#010x} exceeds {:#010x}",
+                    format_segment_name(name),
+                    len,
+                    head.0,
+                    end.0
+                )
+            }
+            BuilderError::AddressOverflow { head, len } => {
+                write!(
+                    f,
+                    "address overflow: advancing {:#010x} by {} bytes",
+                    head.0, len
+                )
+            }
+            BuilderError::WriteTooLarge { len } => {
+                write!(f, "write too large for image builder: {len} bytes")
+            }
         }
     }
 }
@@ -163,13 +230,9 @@ impl Error for BuilderError {}
 
 impl ImageBuilder {
     pub fn new() -> ImageBuilder {
-        let data_start_addr = ByteAddress(0x10000000);
         ImageBuilder {
             img: Image::new(),
-            text_head: ByteAddress::ZERO,
-            data_head: data_start_addr,
-            data_start_addr,
-            data_max_size: 0x10000000,
+            segments: Vec::new(),
         }
     }
 
@@ -177,91 +240,179 @@ impl ImageBuilder {
         self.img
     }
 
-    pub fn write_text_word(&mut self, text: u32) -> Result<ByteAddress, BuilderError> {
-        if self.text_head.0 > self.data_start_addr.0 - 4 {
-            return Err(BuilderError::TextOverflow);
+    pub fn define_segment(
+        &mut self,
+        name: Option<&str>,
+        start: ByteAddress,
+        end: ByteAddress,
+    ) -> Result<SegmentId, BuilderError> {
+        if start >= end {
+            return Err(BuilderError::InvalidSegmentRange { start, end });
         }
-        self.img.write_word(self.text_head, text);
-        let re = self.text_head;
-        self.text_head = self.text_head.overflowing_add_bytes(ByteOffset(4)).0;
-        Ok(re)
+
+        for segment in &self.segments {
+            if start < segment.end && segment.start < end {
+                return Err(BuilderError::SegmentOverlap {
+                    name: name.map(str::to_owned),
+                    start,
+                    end,
+                });
+            }
+        }
+
+        let id = SegmentId(self.segments.len());
+        self.segments.push(Segment {
+            name: name.map(str::to_owned),
+            start,
+            end,
+            head: start,
+        });
+        Ok(id)
     }
 
-    pub fn write_text_half_word(&mut self, text: u16) -> Result<ByteAddress, BuilderError> {
-        if self.text_head.0 > self.data_start_addr.0 - 2 {
-            return Err(BuilderError::TextOverflow);
-        }
-        self.img.write_half_word(self.text_head, text);
-        let re = self.text_head;
-        self.text_head = self.text_head.overflowing_add_bytes(ByteOffset(2)).0;
-        Ok(re)
+    pub fn segment_head(&self, id: SegmentId) -> Result<ByteAddress, BuilderError> {
+        Ok(self.segment(id)?.head)
     }
 
-    pub fn write_text_byte(&mut self, text: u8) -> Result<ByteAddress, BuilderError> {
-        if self.text_head.0 > self.data_start_addr.0 - 1 {
-            return Err(BuilderError::TextOverflow);
-        }
-        self.img.write_byte(self.text_head, text);
-        let re = self.text_head;
-        self.text_head = self.text_head.overflowing_add_bytes(ByteOffset(1)).0;
-        Ok(re)
+    pub fn reserve_bytes(&mut self, id: SegmentId, len: u32) -> Result<ByteAddress, BuilderError> {
+        self.advance_segment(id, len)
     }
 
-    pub fn write_text_bytes(&mut self, text: &[u8]) -> Result<ByteAddress, BuilderError> {
-        let len = text.len() as u32;
-        if self.text_head.0 > self.data_start_addr.0 - len {
-            return Err(BuilderError::TextOverflow);
-        }
-        self.img.write_bytes(self.text_head, text);
-        let re = self.text_head;
-        self.text_head = self
-            .text_head
-            .overflowing_add_bytes(ByteOffset(len as i32))
-            .0;
-        Ok(re)
+    pub fn write_word(&mut self, id: SegmentId, data: u32) -> Result<ByteAddress, BuilderError> {
+        let addr = self.advance_segment(id, 4)?;
+        self.img.write_word(addr, data);
+        Ok(addr)
     }
 
-    pub fn write_data_word(&mut self, data: u32) -> Result<ByteAddress, BuilderError> {
-        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - 4 {
-            return Err(BuilderError::DataOverflow);
-        }
-        self.img.write_word(self.data_head, data);
-        let re = self.data_head;
-        self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(4)).0;
-        Ok(re)
+    pub fn write_half_word(
+        &mut self,
+        id: SegmentId,
+        data: u16,
+    ) -> Result<ByteAddress, BuilderError> {
+        let addr = self.advance_segment(id, 2)?;
+        self.img.write_half_word(addr, data);
+        Ok(addr)
     }
 
-    pub fn write_data_half_word(&mut self, data: u16) -> Result<ByteAddress, BuilderError> {
-        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - 2 {
-            return Err(BuilderError::DataOverflow);
-        }
-        self.img.write_half_word(self.data_head, data);
-        let re = self.data_head;
-        self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(2)).0;
-        Ok(re)
+    pub fn write_byte(&mut self, id: SegmentId, data: u8) -> Result<ByteAddress, BuilderError> {
+        let addr = self.advance_segment(id, 1)?;
+        self.img.write_byte(addr, data);
+        Ok(addr)
     }
 
-    pub fn write_data_byte(&mut self, data: u8) -> Result<ByteAddress, BuilderError> {
-        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - 1 {
-            return Err(BuilderError::DataOverflow);
-        }
-        self.img.write_byte(self.data_head, data);
-        let re = self.data_head;
-        self.data_head = self.data_head.overflowing_add_bytes(ByteOffset(1)).0;
-        Ok(re)
+    pub fn write_bytes(
+        &mut self,
+        id: SegmentId,
+        bytes: &[u8],
+    ) -> Result<ByteAddress, BuilderError> {
+        let len = u32::try_from(bytes.len())
+            .map_err(|_| BuilderError::WriteTooLarge { len: bytes.len() })?;
+        let addr = self.advance_segment(id, len)?;
+        self.img.write_bytes(addr, bytes);
+        Ok(addr)
     }
 
-    pub fn write_data_bytes(&mut self, data: &[u8]) -> Result<ByteAddress, BuilderError> {
-        let len = data.len() as u32;
-        if self.data_head.0 > self.data_start_addr.0 + self.data_max_size - len {
-            return Err(BuilderError::DataOverflow);
+    fn segment(&self, id: SegmentId) -> Result<&Segment, BuilderError> {
+        self.segments.get(id.0).ok_or(BuilderError::UnknownSegment)
+    }
+
+    fn advance_segment(&mut self, id: SegmentId, len: u32) -> Result<ByteAddress, BuilderError> {
+        let segment = self
+            .segments
+            .get_mut(id.0)
+            .ok_or(BuilderError::UnknownSegment)?;
+        let head = segment.head;
+        let Some(next) = head.0.checked_add(len) else {
+            return Err(BuilderError::AddressOverflow { head, len });
+        };
+        if next > segment.end.0 {
+            return Err(BuilderError::SegmentOverflow {
+                name: segment.name.clone(),
+                head,
+                len,
+                end: segment.end,
+            });
         }
-        self.img.write_bytes(self.data_head, data);
-        let re = self.data_head;
-        self.data_head = self
-            .data_head
-            .overflowing_add_bytes(ByteOffset(len as i32))
-            .0;
-        Ok(re)
+        segment.head = ByteAddress(next);
+        Ok(head)
+    }
+}
+
+fn format_segment_name(name: &Option<String>) -> String {
+    match name {
+        Some(name) => format!(" `{name}`"),
+        None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Image, ImageBuilder};
+    use crate::ByteAddress;
+
+    #[test]
+    fn builder_segments_have_independent_heads() {
+        let mut builder = ImageBuilder::new();
+        let text = builder
+            .define_segment(Some("text"), ByteAddress(0), ByteAddress(0x100))
+            .unwrap();
+        let data = builder
+            .define_segment(Some("data"), ByteAddress(0x1000), ByteAddress(0x1100))
+            .unwrap();
+
+        assert_eq!(
+            builder.write_word(text, 0x1122_3344).unwrap(),
+            ByteAddress(0)
+        );
+        assert_eq!(
+            builder.write_bytes(data, b"abc").unwrap(),
+            ByteAddress(0x1000)
+        );
+        assert_eq!(builder.segment_head(text).unwrap(), ByteAddress(4));
+        assert_eq!(builder.segment_head(data).unwrap(), ByteAddress(0x1003));
+    }
+
+    #[test]
+    fn builder_rejects_segment_overflow() {
+        let mut builder = ImageBuilder::new();
+        let text = builder
+            .define_segment(Some("text"), ByteAddress(0), ByteAddress(4))
+            .unwrap();
+
+        builder.write_word(text, 0).unwrap();
+        let err = builder.write_byte(text, 1).unwrap_err().to_string();
+        assert!(err.contains("segment `text` overflow"));
+    }
+
+    #[test]
+    fn builder_rejects_overlapping_segments() {
+        let mut builder = ImageBuilder::new();
+        builder
+            .define_segment(Some("a"), ByteAddress(0), ByteAddress(0x100))
+            .unwrap();
+        let err = builder
+            .define_segment(Some("b"), ByteAddress(0x80), ByteAddress(0x180))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("segment `b` overlaps existing segment"));
+    }
+
+    #[test]
+    fn builder_reserve_advances_without_emitting_bytes() {
+        let mut builder = ImageBuilder::new();
+        let heap = builder
+            .define_segment(Some("heap"), ByteAddress(0x2000), ByteAddress(0x3000))
+            .unwrap();
+
+        assert_eq!(
+            builder.reserve_bytes(heap, 0x20).unwrap(),
+            ByteAddress(0x2000)
+        );
+        assert_eq!(builder.segment_head(heap).unwrap(), ByteAddress(0x2020));
+
+        let image: Image = builder.emit_image();
+        let mut machine = image.consume_to_machine();
+        assert_eq!(machine.read_byte(ByteAddress(0x2000)), 0);
     }
 }

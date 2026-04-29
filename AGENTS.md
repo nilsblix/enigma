@@ -11,9 +11,9 @@ Short guidance for coding agents working in this repository.
 
 Useful CLI subcommands:
 
-- `run-image <file.evm>`
-- `run-asm <file.esm>`
-- `emit-image <file.esm> [out.evm]`
+- `runimage <file.evm>`
+- `runasm <file.esm>`
+- `emit <file.esm> [out.evm]`
 
 ## Project Layout
 
@@ -29,6 +29,6 @@ Useful CLI subcommands:
   disagree.
 - Keep changes aligned with the current public behavior of the CLI and library.
 - When changing assembler or image behavior, verify it with a focused test or a
-  `run-asm` check.
+  `runasm` check.
 - Prefer small, targeted changes over broad rewrites unless the task requires
   them.

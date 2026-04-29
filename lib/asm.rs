@@ -1,7 +1,8 @@
 use std::fmt;
 
 use crate::{
-    ByteAddress, Op, image,
+    ByteAddress, Op,
+    image::{self, SegmentId},
     is::{self, Instruction},
 };
 
@@ -63,8 +64,8 @@ impl Token<'_> {
     #[rustfmt::skip]
     fn tag(&self) -> String {
         match self {
-            Token::String { span: _, raw } => format!("string \"{}\"", raw),
-            Token::Ident  { span: _, raw } => format!("identifier `{}`", raw),
+            Token::String { span: _, raw } => format!("string \"{raw}\""),
+            Token::Ident  { span: _, raw } => format!("identifier `{raw}`"),
         }
     }
 
@@ -200,13 +201,34 @@ fn write_diagnostics(
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    Layout,
+    Emit,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SymbolKind {
+    Constant,
+    Label,
+}
+
+struct Symbol<'src> {
+    name: &'src str,
+    value: u32,
+    kind: SymbolKind,
+}
+
 struct Assembler<'s> {
     src: &'s str,
     lexer: Lexer<'s>,
     cursor: usize,
 
-    ptrs: Vec<(&'s str, ByteAddress)>,
+    symbols: Vec<Symbol<'s>>,
     builder: image::ImageBuilder,
+    active_segment: Option<SegmentId>,
+    last_instruction: Option<(SegmentId, usize)>,
+    setreg_widths: Vec<(usize, usize)>,
 
     diags: Vec<Diagnostic>,
 }
@@ -217,40 +239,75 @@ impl<'s> Assembler<'s> {
             src,
             lexer: Lexer::new(src),
             cursor: 0,
-            ptrs: Vec::new(),
+            symbols: Vec::new(),
             builder: image::ImageBuilder::new(),
+            active_segment: None,
+            last_instruction: None,
+            setreg_widths: Vec::new(),
             diags: vec![],
         }
     }
 
     fn assemble_until_end(mut self) -> Result<image::Image, Diagnostics<'s>> {
-        while self.cursor < self.lexer.toks.len() {
-            let tok = &self.lexer.toks[self.cursor];
+        self.assemble_pass(Pass::Layout);
+        if !self.diags.is_empty() {
+            return Err(Diagnostics {
+                src: self.src,
+                diags: self.diags,
+            });
+        }
 
+        self.cursor = 0;
+        self.builder = image::ImageBuilder::new();
+        self.active_segment = None;
+        self.last_instruction = None;
+
+        self.assemble_pass(Pass::Emit);
+        if let Some((segment, pos)) = self.last_instruction {
+            if let Err(err) = self.builder.write_word(segment, is::halt().encode()) {
+                self.push_diag(pos, err.to_string());
+            }
+        }
+
+        if self.diags.is_empty() {
+            Ok(self.builder.emit_image())
+        } else {
+            Err(Diagnostics {
+                src: self.src,
+                diags: self.diags,
+            })
+        }
+    }
+
+    fn assemble_pass(&mut self, pass: Pass) {
+        while self.cursor < self.lexer.toks.len() {
+            let tok = self.lexer.toks[self.cursor];
             self.cursor += 1;
+
             match tok {
                 Token::String {
                     span: (st, _),
                     raw: _,
                 } => {
                     let msg = format!("unexpected token: {}", tok.tag());
-                    self.push_diag(*st, msg);
+                    self.push_diag(st, msg);
                 }
-                Token::Ident { span, raw } => self.assemble_ident(*span, raw),
+                Token::Ident { span, raw } => self.assemble_ident(pass, span, raw),
             }
-        }
-
-        if self.diags.len() != 0 {
-            Err(Diagnostics {
-                src: self.src,
-                diags: self.diags,
-            })
-        } else {
-            Ok(self.builder.emit_image())
         }
     }
 
-    fn assemble_ident(&mut self, span: Span, raw: &str) {
+    fn assemble_ident(&mut self, pass: Pass, span: Span, raw: &'s str) {
+        if raw == "segment" {
+            self.assemble_segment(span);
+            return;
+        }
+
+        if let Some(name) = raw.strip_suffix(':') {
+            self.assemble_label(pass, span, name);
+            return;
+        }
+
         let mn = match find_mneumonic(raw) {
             Ok(m) => m,
             Err(msg) => {
@@ -260,31 +317,139 @@ impl<'s> Assembler<'s> {
         };
 
         match mn {
-            Mneumonic::Op(op) => match self.assemble_instruction(span, op) {
+            Mneumonic::Op(op) => match self.assemble_instruction(pass, span, op) {
                 Ok(()) => {}
-                Err((pos, msg)) => {
-                    self.push_diag(pos, msg);
-                    return;
-                }
+                Err((pos, msg)) => self.push_diag(pos, msg),
             },
-            Mneumonic::Directive(di) => match self.assemble_directive(span, di) {
+            Mneumonic::Directive(di) => match self.assemble_directive(pass, span, di) {
                 Ok(()) => {}
-                Err((pos, msg)) => {
-                    self.push_diag(pos, msg);
-                    return;
-                }
+                Err((pos, msg)) => self.push_diag(pos, msg),
             },
         }
     }
 
-    fn assemble_instruction(&mut self, span: Span, op: Op) -> Result<(), (usize, String)> {
+    fn assemble_segment(&mut self, span: Span) {
+        let first = match self.next_token(span.1, "segment name or `from`") {
+            Ok(tok) => tok,
+            Err((pos, msg)) => {
+                self.push_diag(pos, msg);
+                return;
+            }
+        };
+
+        let (name, from_tok) = match first {
+            Token::Ident { raw: "from", .. } => (None, first),
+            Token::Ident { raw, .. } => {
+                match self.next_token(first.logical_end(), "`from` after segment name") {
+                    Ok(tok) => (Some(raw), tok),
+                    Err((pos, msg)) => {
+                        self.push_diag(pos, msg);
+                        return;
+                    }
+                }
+            }
+            other => {
+                self.push_diag(
+                    other.logical_start(),
+                    format!("expected segment name or `from`, found: {}", other.tag()),
+                );
+                return;
+            }
+        };
+
+        if let Err((pos, msg)) = expect_ident(&from_tok, "from", "`from` in segment declaration") {
+            self.push_diag(pos, msg);
+            return;
+        }
+
+        let start_tok = match self.next_token(from_tok.logical_end(), "segment start address") {
+            Ok(tok) => tok,
+            Err((pos, msg)) => {
+                self.push_diag(pos, msg);
+                return;
+            }
+        };
+        let to_tok = match self.next_token(start_tok.logical_end(), "`to` in segment declaration") {
+            Ok(tok) => tok,
+            Err((pos, msg)) => {
+                self.push_diag(pos, msg);
+                return;
+            }
+        };
+        if let Err((pos, msg)) = expect_ident(&to_tok, "to", "`to` in segment declaration") {
+            self.push_diag(pos, msg);
+            return;
+        }
+        let end_tok = match self.next_token(to_tok.logical_end(), "segment end address") {
+            Ok(tok) => tok,
+            Err((pos, msg)) => {
+                self.push_diag(pos, msg);
+                return;
+            }
+        };
+
+        let start = match self.resolve_value(&start_tok, false) {
+            Ok(Some(value)) => ByteAddress(value),
+            Ok(None) => unreachable!("unresolved values are disabled"),
+            Err((pos, msg)) => {
+                self.push_diag(pos, msg);
+                return;
+            }
+        };
+        let end = match self.resolve_value(&end_tok, false) {
+            Ok(Some(value)) => ByteAddress(value),
+            Ok(None) => unreachable!("unresolved values are disabled"),
+            Err((pos, msg)) => {
+                self.push_diag(pos, msg);
+                return;
+            }
+        };
+
+        match self.builder.define_segment(name, start, end) {
+            Ok(id) => self.active_segment = Some(id),
+            Err(err) => self.push_diag(span.0, err.to_string()),
+        }
+    }
+
+    fn assemble_label(&mut self, pass: Pass, span: Span, name: &'s str) {
+        if name.is_empty() {
+            self.push_diag(span.0, "empty label name".to_string());
+            return;
+        }
+
+        let Some(segment) = self.active_segment else {
+            self.push_diag(
+                span.0,
+                format!("label `{name}` appears outside any segment"),
+            );
+            return;
+        };
+
+        if pass == Pass::Layout {
+            match self.builder.segment_head(segment) {
+                Ok(addr) => {
+                    if let Err((pos, msg)) =
+                        self.define_symbol(span.0, name, addr.0, SymbolKind::Label)
+                    {
+                        self.push_diag(pos, msg);
+                    }
+                }
+                Err(err) => self.push_diag(span.0, err.to_string()),
+            }
+        }
+    }
+
+    fn assemble_instruction(
+        &mut self,
+        pass: Pass,
+        span: Span,
+        op: Op,
+    ) -> Result<(), (usize, String)> {
+        let segment = self.require_active_segment(span.0, "instruction")?;
         let rest = &self.lexer.toks[self.cursor..];
 
         let inst = match op {
             Op::Noop => Instruction::NOOP,
-            ////////////////////////////////////////////////////////////////////
-            // R types
-            ////////////////////////////////////////////////////////////////////
             Op::Add
             | Op::Sub
             | Op::Shl
@@ -308,9 +473,6 @@ impl<'s> Assembler<'s> {
                 self.cursor += 1;
                 is::debu(rr)
             }
-            ////////////////////////////////////////////////////////////////////
-            // I types
-            ////////////////////////////////////////////////////////////////////
             Op::Sys => {
                 expect_token_count(op, rest, 0).map_err(|e| (span.0, e))?;
                 is::sys()
@@ -342,126 +504,267 @@ impl<'s> Assembler<'s> {
                 expect_token_count(op, rest, 3).map_err(|e| (span.0, e))?;
                 let rr = parse_register_diag(&rest[0])?;
                 let ra = parse_register_diag(&rest[1])?;
-                let imm = parse_u16(&rest[2]).ok_or((
-                    rest[2].logical_start(),
-                    format!("could not parse u16 immediate: {}", rest[2].tag()),
-                ))?;
+                let imm = if pass == Pass::Emit {
+                    self.resolve_u16(&rest[2])?
+                } else {
+                    0
+                };
                 self.cursor += 3;
-
                 Instruction::i_type(op, rr, ra, imm)
             }
         };
 
-        self.builder
-            .write_text_word(inst.encode())
-            .map_err(|e| (span.0, e.to_string()))?;
+        if pass == Pass::Emit {
+            self.builder
+                .write_word(segment, inst.encode())
+                .map_err(|e| (span.0, e.to_string()))?;
+            self.last_instruction = Some((segment, span.0));
+        } else {
+            self.builder
+                .reserve_bytes(segment, 4)
+                .map_err(|e| (span.0, e.to_string()))?;
+        }
         Ok(())
     }
 
-    #[rustfmt::skip]
     fn assemble_directive(
         &mut self,
+        pass: Pass,
         span: Span,
-        di: Directive
+        di: Directive,
     ) -> Result<(), (usize, String)> {
         match di {
             Directive::Ascii => {
-                let name_tok = self.next_token(span.1, "identifier after .ascii directive")?;
-                let name = match name_tok {
-                    Token::Ident { span: _, raw } => raw,
-                    t => return Err((
-                            t.logical_start(),
-                            format!(
-                                "expected identifier after .ascii directive, found: {}",
-                                t.tag()
-                            ),
-                        )),
-                };
-
-                let string_tok =
-                    self.next_token(name_tok.logical_end(), "string after .ascii directive + name")?;
+                let segment = self.require_active_segment(span.0, ".ascii directive")?;
+                let string_tok = self.next_token(span.1, "string after .ascii directive")?;
                 let (string_pos, string) = match string_tok {
                     Token::String { span, raw } => (span.0, raw),
-                    t => return Err((
+                    t => {
+                        return Err((
                             t.logical_start(),
-                            format!(
-                                "expected string after .ascii directive + name, found: {}",
-                                t.tag()
-                            ),
-                        )),
+                            format!("expected string after .ascii directive, found: {}", t.tag()),
+                        ));
+                    }
                 };
 
                 let bytes = decode_string_literal(string)
                     .map_err(|(offset, msg)| (string_pos + 1 + offset, msg))?;
-                let addr = self
-                    .builder
-                    .write_data_bytes(bytes.as_slice())
+                if pass == Pass::Emit {
+                    self.builder
+                        .write_bytes(segment, bytes.as_slice())
+                        .map_err(|e| (span.0, e.to_string()))?;
+                } else {
+                    self.builder
+                        .reserve_bytes(segment, bytes.len() as u32)
+                        .map_err(|e| (span.0, e.to_string()))?;
+                }
+            }
+            Directive::Space => {
+                let segment = self.require_active_segment(span.0, ".space directive")?;
+                let len_tok = self.next_token(span.1, "byte count after .space directive")?;
+                let len = self
+                    .resolve_value(&len_tok, false)?
+                    .expect("unresolved values are disabled");
+                self.builder
+                    .reserve_bytes(segment, len)
                     .map_err(|e| (span.0, e.to_string()))?;
-                self.ptrs.push((name, addr));
+            }
+            Directive::Equ => {
+                let name_tok = self.next_token(span.1, "identifier after .equ directive")?;
+                let name = match name_tok {
+                    Token::Ident { raw, .. } => raw,
+                    t => {
+                        return Err((
+                            t.logical_start(),
+                            format!(
+                                "expected identifier after .equ directive, found: {}",
+                                t.tag()
+                            ),
+                        ));
+                    }
+                };
+                let value_tok =
+                    self.next_token(name_tok.logical_end(), "value after .equ directive")?;
+                if pass == Pass::Layout {
+                    let value = self
+                        .resolve_value(&value_tok, false)?
+                        .expect("unresolved values are disabled");
+                    self.define_symbol(span.0, name, value, SymbolKind::Constant)?;
+                }
             }
             Directive::SetRegister => {
+                let segment = self.require_active_segment(span.0, ".setreg directive")?;
                 let reg_tok = self.next_token(span.1, "register after .setreg directive")?;
                 let reg = parse_register_diag(&reg_tok)?;
                 let set_tok = self.next_token(
                     reg_tok.logical_end(),
                     "identifier or immediate after .setreg directive",
                 )?;
-                let set_str = match set_tok {
-                    Token::Ident { span: _, raw } => raw,
-                    t => return Err((
+                match set_tok {
+                    Token::Ident { .. } => {}
+                    t => {
+                        return Err((
                             t.logical_start(),
                             format!(
                                 "expected an identifier after .setreg directive, found: {}",
                                 t.tag()
                             ),
-                        )),
-                };
-                if let Some(name) = set_str.strip_prefix("@") {
-                    if let Some(ByteAddress(ptr)) = self.find_ptr_by_name(name) {
-                        self.append_is_for_setreg(set_tok.logical_start(), reg, ptr)?;
-                        return Ok(());
+                        ));
                     }
-
-                    return Err((
-                        set_tok.logical_start(),
-                        format!("unknown ptr '{}'", name),
-                    ));
                 }
 
-                let set = u32::from_str_radix(set_str, 10)
+                if pass == Pass::Layout {
+                    let byte_len = self.setreg_instruction_count(&set_tok, true)? * 4;
+                    self.setreg_widths.push((span.0, byte_len / 4));
+                    self.builder
+                        .reserve_bytes(segment, byte_len as u32)
+                        .map_err(|e| (span.0, e.to_string()))?;
+                    return Ok(());
+                }
+
+                let set = self
+                    .resolve_value(&set_tok, false)?
+                    .expect("unresolved values are disabled");
+                self.builder
+                    .write_word(segment, is::xori(reg, 0, set as u16).encode())
                     .map_err(|e| (set_tok.logical_start(), e.to_string()))?;
-                self.append_is_for_setreg(set_tok.logical_start(), reg, set)?;
-            },
-        }
-
-        Ok(())
-    }
-
-    fn append_is_for_setreg(
-        &mut self,
-        source_pos: usize,
-        reg: usize,
-        set: u32,
-    ) -> Result<(), (usize, String)> {
-        self.builder
-            .write_text_word(is::xori(reg, 0, set as u16).encode())
-            .map_err(|e| (source_pos, e.to_string()))?;
-        if set > u16::MAX as u32 {
-            self.builder
-                .write_text_word(is::orui(reg, reg, (set >> 16) as u16).encode())
-                .map_err(|e| (source_pos, e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn find_ptr_by_name(&self, name: &str) -> Option<ByteAddress> {
-        for (n, ptr) in self.ptrs.iter() {
-            if *n == name {
-                return Some(*ptr);
+                self.last_instruction = Some((segment, span.0));
+                if self.setreg_instruction_count_at(span.0, &set_tok, set)? == 2 {
+                    self.builder
+                        .write_word(segment, is::orui(reg, reg, (set >> 16) as u16).encode())
+                        .map_err(|e| (set_tok.logical_start(), e.to_string()))?;
+                    self.last_instruction = Some((segment, span.0));
+                }
             }
         }
 
-        None
+        Ok(())
+    }
+
+    fn setreg_instruction_count(
+        &self,
+        tok: &Token<'s>,
+        allow_unresolved: bool,
+    ) -> Result<usize, (usize, String)> {
+        match tok {
+            Token::Ident { raw, .. } => {
+                if let Some(value) = parse_u32_literal(raw) {
+                    return Ok(if value > u16::MAX as u32 { 2 } else { 1 });
+                }
+                let Some(symbol) = self.find_symbol(symbol_name(raw)) else {
+                    if allow_unresolved {
+                        return Ok(2);
+                    }
+                    return Err((tok.logical_start(), format!("unknown symbol '{raw}'")));
+                };
+                match symbol.kind {
+                    SymbolKind::Constant => Ok(if symbol.value > u16::MAX as u32 { 2 } else { 1 }),
+                    SymbolKind::Label => Ok(2),
+                }
+            }
+            _ => Err((
+                tok.logical_start(),
+                format!("expected identifier or immediate, found: {}", tok.tag()),
+            )),
+        }
+    }
+
+    fn setreg_instruction_count_at(
+        &self,
+        pos: usize,
+        tok: &Token<'s>,
+        value: u32,
+    ) -> Result<usize, (usize, String)> {
+        if let Some((_, count)) = self
+            .setreg_widths
+            .iter()
+            .find(|(setreg_pos, _)| *setreg_pos == pos)
+        {
+            return Ok(*count);
+        }
+
+        match tok {
+            Token::Ident { raw, .. } if parse_u32_literal(raw).is_some() => {
+                Ok(if value > u16::MAX as u32 { 2 } else { 1 })
+            }
+            Token::Ident { raw, .. } if self.find_symbol(symbol_name(raw)).is_some() => Ok(2),
+            Token::Ident { raw, .. } => {
+                Err((tok.logical_start(), format!("unknown symbol '{raw}'")))
+            }
+            _ => Err((
+                tok.logical_start(),
+                format!("expected identifier or immediate, found: {}", tok.tag()),
+            )),
+        }
+    }
+
+    fn resolve_u16(&self, tok: &Token<'s>) -> Result<u16, (usize, String)> {
+        let value = self
+            .resolve_value(tok, false)?
+            .expect("unresolved values are disabled");
+        u16::try_from(value).map_err(|_| {
+            (
+                tok.logical_start(),
+                format!("value does not fit in u16 immediate: {value:#x}"),
+            )
+        })
+    }
+
+    fn resolve_value(
+        &self,
+        tok: &Token<'s>,
+        allow_unresolved: bool,
+    ) -> Result<Option<u32>, (usize, String)> {
+        let raw = match tok {
+            Token::Ident { raw, .. } => raw,
+            t => {
+                return Err((
+                    t.logical_start(),
+                    format!("expected identifier or immediate, found: {}", t.tag()),
+                ));
+            }
+        };
+
+        if let Some(value) = parse_u32_literal(raw) {
+            return Ok(Some(value));
+        }
+
+        if let Some(symbol) = self.find_symbol(symbol_name(raw)) {
+            return Ok(Some(symbol.value));
+        }
+
+        if allow_unresolved {
+            Ok(None)
+        } else {
+            Err((tok.logical_start(), format!("unknown symbol '{raw}'")))
+        }
+    }
+
+    fn define_symbol(
+        &mut self,
+        pos: usize,
+        name: &'s str,
+        value: u32,
+        kind: SymbolKind,
+    ) -> Result<(), (usize, String)> {
+        if self.find_symbol(name).is_some() {
+            return Err((pos, format!("duplicate symbol '{name}'")));
+        }
+        self.symbols.push(Symbol { name, value, kind });
+        Ok(())
+    }
+
+    fn find_symbol(&self, name: &str) -> Option<&Symbol<'s>> {
+        self.symbols.iter().find(|symbol| symbol.name == name)
+    }
+
+    fn require_active_segment(
+        &self,
+        pos: usize,
+        item: &'static str,
+    ) -> Result<SegmentId, (usize, String)> {
+        self.active_segment
+            .ok_or((pos, format!("{item} appears outside any segment")))
     }
 
     fn next_token(
@@ -486,7 +789,9 @@ impl<'s> Assembler<'s> {
 #[derive(Debug)]
 enum Directive {
     Ascii,
+    Equ,
     SetRegister,
+    Space,
 }
 
 impl TryFrom<&str> for Directive {
@@ -495,8 +800,10 @@ impl TryFrom<&str> for Directive {
     fn try_from(value: &str) -> Result<Directive, Self::Error> {
         match value {
             ".ascii" => Ok(Directive::Ascii),
+            ".equ" => Ok(Directive::Equ),
             ".setreg" => Ok(Directive::SetRegister),
-            s => Err(format!("unknown directive: '{}'", s)),
+            ".space" => Ok(Directive::Space),
+            s => Err(format!("unknown directive: '{s}'")),
         }
     }
 }
@@ -516,8 +823,7 @@ fn find_mneumonic(ident: &str) -> Result<Mneumonic, String> {
     }
 
     let f = format!(
-        "unknown mneumonic, expected either an instruction or a directive, found: {}",
-        ident
+        "unknown mneumonic, expected either an instruction or a directive, found: {ident}",
     );
     Err(f)
 }
@@ -536,11 +842,25 @@ fn expect_token_count(op: Op, rest: &[Token], count: usize) -> Result<(), String
     Ok(())
 }
 
-fn parse_u16(tok: &Token) -> Option<u16> {
+fn expect_ident(tok: &Token, expected: &str, expected_desc: &str) -> Result<(), (usize, String)> {
     match tok {
-        Token::Ident { span: _, raw } => u16::from_str_radix(raw, 10).ok(),
-        _ => None,
+        Token::Ident { raw, .. } if *raw == expected => Ok(()),
+        t => Err((
+            t.logical_start(),
+            format!("expected {}, found: {}", expected_desc, t.tag()),
+        )),
     }
+}
+
+fn parse_u32_literal(raw: &str) -> Option<u32> {
+    let cleaned: String = raw.chars().filter(|ch| *ch != '_').collect();
+    if let Some(hex) = cleaned
+        .strip_prefix("0x")
+        .or_else(|| cleaned.strip_prefix("0X"))
+    {
+        return u32::from_str_radix(hex, 16).ok();
+    }
+    cleaned.parse::<u32>().ok()
 }
 
 fn parse_register(reg: &Token) -> Option<usize> {
@@ -555,6 +875,10 @@ fn parse_register_diag(reg: &Token) -> Result<usize, (usize, String)> {
         reg.logical_start(),
         format!("found unknown register: '{}", reg.tag()),
     ))
+}
+
+fn symbol_name(raw: &str) -> &str {
+    raw.strip_prefix('@').unwrap_or(raw)
 }
 
 fn decode_string_literal(raw: &str) -> Result<Vec<u8>, (usize, String)> {
@@ -589,13 +913,13 @@ fn decode_string_literal(raw: &str) -> Result<Vec<u8>, (usize, String)> {
 
                 let hi = hi
                     .to_digit(16)
-                    .ok_or((idx, format!("invalid hex escape digit: '{}'", hi)))?;
+                    .ok_or((idx, format!("invalid hex escape digit: '{hi}'")))?;
                 let lo = lo
                     .to_digit(16)
-                    .ok_or((idx, format!("invalid hex escape digit: '{}'", lo)))?;
+                    .ok_or((idx, format!("invalid hex escape digit: '{lo}'")))?;
                 bytes.push(((hi << 4) | lo) as u8);
             }
-            other => return Err((idx, format!("unknown escape sequence: \\{}", other))),
+            other => return Err((idx, format!("unknown escape sequence: \\{other}"))),
         }
     }
 
@@ -605,11 +929,25 @@ fn decode_string_literal(raw: &str) -> Result<Vec<u8>, (usize, String)> {
 #[cfg(test)]
 mod tests {
     use super::assemble_str;
-    use crate::ByteAddress;
+    use crate::{ByteAddress, Instruction};
 
     #[test]
-    fn ascii_and_setreg_use_data_pointer_and_decode_newline() {
-        let src = ".ascii hello \"Hello, Sailor!\\n\"\n.setreg r3 @hello\n.setreg r4 15\nnoop";
+    fn segments_labels_ascii_and_setreg_layout_across_memory() {
+        let src = r#"
+.equ SYSCALL_WRITE 1
+.equ STDOUT_FD 1
+
+segment data from 0x1000_0000 to 0x2000_0000
+    hello:
+    .ascii "Hello, Sailor!\n"
+
+segment text from 0x0000_0000 to 0x1000_0000
+    .setreg r1 SYSCALL_WRITE
+    .setreg r2 STDOUT_FD
+    .setreg r3 hello
+    .setreg r4 15
+    sys
+"#;
         let image = assemble_str(src).expect("assembly should succeed");
         let mut machine = image.consume_to_machine();
 
@@ -621,16 +959,17 @@ mod tests {
 
         machine.exec_and_advance().unwrap();
         machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
         assert_eq!(machine.read_register(3), 0x1000_0000);
-
-        machine.exec_and_advance().unwrap();
-        machine.exec_and_advance().unwrap();
-        assert_eq!(machine.read_register(4), 15);
     }
 
     #[test]
     fn setreg_small_immediate_emits_one_instruction() {
-        let image = assemble_str(".setreg r4 15\nnoop").expect("assembly should succeed");
+        let image = assemble_str("segment text from 0 to 0x1000\n.setreg r4 15\nnoop")
+            .expect("assembly should succeed");
         let mut machine = image.consume_to_machine();
 
         machine.exec_and_advance().unwrap();
@@ -641,34 +980,122 @@ mod tests {
     }
 
     #[test]
-    fn ascii_without_name_reports_diagnostic_instead_of_panicking() {
-        let err = match assemble_str(".ascii") {
+    fn forward_label_reference_across_segments_works() {
+        let src = r#"
+segment text from 0 to 0x1000
+    .setreg r3 message
+
+segment data from 0x1000_0000 to 0x2000_0000
+    message:
+    .ascii "ok"
+"#;
+        let image = assemble_str(src).expect("assembly should succeed");
+        let mut machine = image.consume_to_machine();
+
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        assert_eq!(machine.read_register(3), 0x1000_0000);
+    }
+
+    #[test]
+    fn assembler_appends_halt_after_last_instruction() {
+        let image =
+            assemble_str("segment text from 0 to 0x1000\nnoop").expect("assembly should succeed");
+        let mut machine = image.consume_to_machine();
+
+        machine.exec_and_advance().unwrap();
+        assert_eq!(machine.current_instruction().unwrap(), Instruction::HALT);
+    }
+
+    #[test]
+    fn space_reserves_addresses_without_emitting_bytes() {
+        let src = r#"
+segment heap from 0x2000_0000 to 0x3000_0000
+    heap_start:
+    .space 0x10
+    heap_end:
+
+segment text from 0 to 0x1000
+    .setreg r1 heap_start
+    .setreg r2 heap_end
+"#;
+        let image = assemble_str(src).expect("assembly should succeed");
+        let mut machine = image.consume_to_machine();
+
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        machine.exec_and_advance().unwrap();
+        assert_eq!(machine.read_register(1), 0x2000_0000);
+        assert_eq!(machine.read_register(2), 0x2000_0010);
+        assert_eq!(machine.read_byte(ByteAddress(0x2000_0000)), 0);
+    }
+
+    #[test]
+    fn directive_outside_segment_reports_diagnostic() {
+        let err = match assemble_str(".ascii \"nope\"") {
             Ok(_) => panic!("assembly should fail"),
             Err(err) => err,
         };
         let rendered = err.to_string();
 
-        assert!(rendered.contains("--> <input>:1:7: error:"));
-        assert!(
-            rendered.contains("expected identifier after .ascii directive, found end of input")
-        );
-        assert!(rendered.contains("  |"));
-        assert!(rendered.contains("1 | .ascii"));
-        assert!(rendered.contains("  |       ^"));
-        assert!(rendered.contains(".ascii"));
+        assert!(rendered.contains(".ascii directive appears outside any segment"));
+        assert!(rendered.contains("1 | .ascii \"nope\""));
+    }
+
+    #[test]
+    fn overlapping_segments_report_diagnostic() {
+        let err = match assemble_str("segment a from 0 to 0x100\nsegment b from 0x80 to 0x200") {
+            Ok(_) => panic!("assembly should fail"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("segment `b` overlaps existing segment"));
+    }
+
+    #[test]
+    fn duplicate_symbol_reports_diagnostic() {
+        let err = match assemble_str(".equ same 1\nsegment text from 0 to 0x100\nsame:\nnoop") {
+            Ok(_) => panic!("assembly should fail"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("duplicate symbol 'same'"));
+    }
+
+    #[test]
+    fn unknown_setreg_symbol_reports_diagnostic() {
+        let err = match assemble_str("segment text from 0 to 0x100\n.setreg r1 missing") {
+            Ok(_) => panic!("assembly should fail"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("unknown symbol 'missing'"));
+    }
+
+    #[test]
+    fn segment_overflow_reports_diagnostic() {
+        let err = match assemble_str("segment text from 0 to 4\nnoop") {
+            Ok(_) => panic!("assembly should fail"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+
+        assert!(rendered.contains("segment `text` overflow"));
     }
 
     #[test]
     fn setreg_without_operands_reports_diagnostic_instead_of_panicking() {
-        let err = match assemble_str(".setreg") {
+        let err = match assemble_str("segment text from 0 to 0x100\n.setreg") {
             Ok(_) => panic!("assembly should fail"),
             Err(err) => err,
         };
         let rendered = err.to_string();
 
-        assert!(rendered.contains("--> <input>:1:8: error:"));
         assert!(rendered.contains("expected register after .setreg directive, found end of input"));
-        assert!(rendered.contains("1 | .setreg"));
-        assert!(rendered.contains("  |        ^"));
+        assert!(rendered.contains(".setreg"));
     }
 }

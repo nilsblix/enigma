@@ -315,7 +315,7 @@ struct TestController {
 impl IoController for TestController {
     fn read(&mut self, _mem: &mut Memory, addr: ByteAddress, width: Width) -> u32 {
         self.state.reads.set(self.state.reads.get() + 1);
-        let (_, offset) = addr.into_block_parts();
+        let (_, offset) = addr.block_parts();
         let offset = usize::from(offset);
         let bytes = self.state.bytes.borrow();
         match width {
@@ -332,7 +332,7 @@ impl IoController for TestController {
 
     fn write(&mut self, _mem: &mut Memory, addr: ByteAddress, width: Width, data: u32) {
         self.state.writes.set(self.state.writes.get() + 1);
-        let (_, offset) = addr.into_block_parts();
+        let (_, offset) = addr.block_parts();
         let offset = usize::from(offset);
         let mut bytes = self.state.bytes.borrow_mut();
         match width {
@@ -422,7 +422,7 @@ fn with_controller_skips_non_empty_io_window_blocks() {
 #[test]
 fn with_controller_returns_error_when_no_io_slots_remain() {
     let mut m = Machine::new();
-    let (start_block, _) = ByteAddress(IO_BEGINNING).into_block_parts();
+    let (start_block, _) = ByteAddress(IO_BEGINNING).block_parts();
     for index in usize::from(start_block)..BLOCK_COUNT {
         m.mem.blocks[index] = Block::with_io();
     }

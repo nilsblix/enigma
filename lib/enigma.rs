@@ -93,9 +93,9 @@ pub trait SystemCall {
     ///
     /// * r1 is the syscall number to invoke.
     /// * r1 is also the return value, which is non-zero on error. A return
-    /// value of 1 is reserved for unknown syscall nr.
+    ///   value of 1 is reserved for unknown syscall nr.
     /// * r2..r7 are the arguments, generally try to keep number of arguments
-    /// less than or equal to 6.
+    ///   less than or equal to 6.
     /// * r2 can also be used as a secondary return or errno/status.
     fn invoke(&mut self, mem: &mut Memory, regs: &mut Registers);
 }
@@ -135,7 +135,7 @@ pub struct BlockOffset(pub u16);
 impl ByteAddress {
     pub const ZERO: ByteAddress = ByteAddress(0);
 
-    pub fn into_block_parts(&self) -> (BlockIndex, BlockOffset) {
+    pub fn block_parts(&self) -> (BlockIndex, BlockOffset) {
         let index = (self.0 >> 16) as u16;
         let offset = (self.0 & 0xFFFF) as u16;
         (BlockIndex(index), BlockOffset(offset))
@@ -269,12 +269,12 @@ impl Memory {
     }
 
     pub fn block_from_addr(&self, addr: ByteAddress) -> (&Block, BlockOffset) {
-        let (block_index, block_offset) = addr.into_block_parts();
+        let (block_index, block_offset) = addr.block_parts();
         (self.block(block_index), block_offset)
     }
 
     pub fn block_from_addr_mut(&mut self, addr: ByteAddress) -> (&mut Block, BlockOffset) {
-        let (block_index, block_offset) = addr.into_block_parts();
+        let (block_index, block_offset) = addr.block_parts();
         (self.block_mut(block_index), block_offset)
     }
 
@@ -288,9 +288,9 @@ impl Memory {
     }
 
     pub fn read_raw_bytes(&self, addr: ByteAddress, buf: &mut [u8]) {
-        for i in 0..buf.len() {
+        for (i, val) in buf.iter_mut().enumerate() {
             let (offset_addr, _) = addr.overflowing_add_bytes(ByteOffset(i as i32));
-            buf[i] = self.read_raw_byte(offset_addr);
+            *val = self.read_raw_byte(offset_addr);
         }
     }
 
@@ -452,7 +452,7 @@ impl Machine {
         addr: ByteAddress,
         io: Box<dyn IoController>,
     ) -> Option<ByteAddress> {
-        let (block_index, _) = addr.into_block_parts();
+        let (block_index, _) = addr.block_parts();
         if !matches!(self.mem.block(block_index), Block::Empty) {
             return None;
         }
@@ -539,7 +539,7 @@ impl Machine {
             let (byte_addr, _) = addr.overflowing_add_bytes(ByteOffset(i as i32));
             match self.mem.block_from_addr(byte_addr).0 {
                 Block::Io => {
-                    let (block_index, _) = byte_addr.into_block_parts();
+                    let (block_index, _) = byte_addr.block_parts();
 
                     assert!(
                         !touched_ram,
@@ -571,7 +571,7 @@ impl Machine {
     }
 
     pub fn read_io(&mut self, addr: ByteAddress, width: Width) -> u32 {
-        let (block_index, _) = addr.into_block_parts();
+        let (block_index, _) = addr.block_parts();
         let io = self
             .ios
             .get_mut(&block_index)
@@ -595,13 +595,13 @@ impl Machine {
 
     pub fn read_word(&mut self, addr: ByteAddress) -> u32 {
         match self.io_block_index_in_span(addr, 4) {
-            Some(_) => self.read_io(addr, Width::Word) as u32,
+            Some(_) => self.read_io(addr, Width::Word),
             None => self.mem.read_raw_word(addr),
         }
     }
 
     pub fn write_io(&mut self, addr: ByteAddress, width: Width, data: u32) {
-        let (block_index, _) = addr.into_block_parts();
+        let (block_index, _) = addr.block_parts();
         let io = self
             .ios
             .get_mut(&block_index)
@@ -625,7 +625,7 @@ impl Machine {
 
     pub fn write_word(&mut self, addr: ByteAddress, data: u32) {
         match self.io_block_index_in_span(addr, 4) {
-            Some(_) => self.write_io(addr, Width::Word, data as u32),
+            Some(_) => self.write_io(addr, Width::Word, data),
             None => self.mem.write_raw_word(addr, data),
         }
     }
