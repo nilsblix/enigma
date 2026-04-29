@@ -225,8 +225,9 @@ pub const REGISTER_MASK: u32 = 0b11111;
 pub const OPCODE_MASK: u32 = 0b111111;
 pub const IMMEDIATE_MASK: u32 = 0xFFFF;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum InstructionError {
+    #[error("invalid opcode: {opcode}")]
     InvalidOperation { opcode: u8 },
 }
 

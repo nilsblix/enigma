@@ -1,6 +1,8 @@
 #![allow(unused)]
 
-use enigma::{ByteAddress, Machine, Memory, Registers, SystemCall, image::Image, is};
+use enigma::{
+    ByteAddress, Machine, Memory, Registers, SystemCall, builders::MachineBuilder, image::Image, is,
+};
 use std::{
     fs::File,
     io::{self, Read},
@@ -61,16 +63,16 @@ const STDIN_FD: u16 = 0;
 const STDOUT_FD: u16 = 1;
 const STDERR_FD: u16 = 2;
 
-fn attach_os_to_machine(m: &mut Machine) {
-    _ = m.attach_system_call(SYSCALL_WRITE_TO_FD as u32, WriteToFd {});
-    _ = m.attach_system_call(SYSCALL_READ_FROM_FD as u32, ReadFromFd {});
+fn attach_os_to_machine(builder: &mut MachineBuilder) {
+    _ = builder.attach_system_call(SYSCALL_WRITE_TO_FD as u32, WriteToFd {});
+    _ = builder.attach_system_call(SYSCALL_READ_FROM_FD as u32, ReadFromFd {});
 }
 
 fn build_from_bytecode(bytecode: &[u8]) -> Machine {
     let image = Image::from_chunk_bytes(bytecode).expect("invalid EVM image");
-    let mut m = image.branch_to_machine();
-    attach_os_to_machine(&mut m);
-    m
+    let mut builder = MachineBuilder::new().with_image(image);
+    attach_os_to_machine(&mut builder);
+    builder.build()
 }
 
 fn usage() -> ! {
@@ -147,8 +149,9 @@ fn run_asm(args: &mut std::env::Args) {
             std::process::exit(1);
         }
     };
-    let mut m = img.consume_to_machine();
-    attach_os_to_machine(&mut m);
+    let mut builder = MachineBuilder::new().with_image(img);
+    attach_os_to_machine(&mut builder);
+    let mut m = builder.build();
     match m.exec_while_not_halt() {
         Ok(_) => {}
         Err(is::InstructionError::InvalidOperation { opcode }) => {

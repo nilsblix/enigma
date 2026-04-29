@@ -1,6 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 pub mod asm;
+pub mod builders;
 pub mod image;
 pub mod is;
 
@@ -115,6 +116,12 @@ pub enum Block {
 /// A byte-granular address in the machine's flat memory space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ByteAddress(pub u32);
+
+impl fmt::LowerHex for ByteAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::LowerHex::fmt(&self.0, f)
+    }
+}
 
 /// A signed displacement measured in 32-bit bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -387,14 +394,9 @@ impl Memory {
     }
 }
 
-/// We intend to map the addresses above the stack to IO.
-///
-/// Note that the stack beginning should be divisible by the word-size, which
-/// makes sense, i guess?
-pub const STACK_BEGINNING: u32 = 0xEFFFFFFC;
-pub const IO_BEGINNING: u32 = 0xF0000000;
-pub const SP_INDEX: usize = REGISTER_COUNT - 1;
-
+/// The executable state of the Enigma Virtual Machine. This should not be
+/// constructed by itself, and should either be created from
+/// [`builders::MachineBuilder`] or [`builders::MemoryBuilder`].
 pub struct Machine {
     program_counter: ByteAddress,
     regs: Registers,
@@ -415,22 +417,29 @@ pub struct InstructionOutcome {
 
 pub type ExecuteResult = Result<(Instruction, InstructionOutcome), InstructionError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ControllerAttachError {
+    #[error("no empty IO block available")]
     NoEmptyIoBlock,
+    #[error("desired IO block at {addr:#010x} is not empty")]
+    DesiredBlockOccupied { addr: ByteAddress },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SystemCallAttachError {
+    #[error("system call number {call_number} is already attached")]
+    DuplicateCallNumber { call_number: u32 },
 }
 
 impl Machine {
     pub fn new() -> Machine {
-        let mut m = Machine {
+        Machine {
             program_counter: ByteAddress::ZERO,
             regs: Registers::new(),
             mem: Memory::new(),
             ios: BTreeMap::new(),
             sys: BTreeMap::new(),
-        };
-        m.regs.write(SP_INDEX, STACK_BEGINNING);
-        m
+        }
     }
 
     pub fn from_instructions(instructions: &[Instruction]) -> Machine {
@@ -439,7 +448,7 @@ impl Machine {
         m
     }
 
-    pub fn override_with_instructions(&mut self, instructions: &[Instruction]) {
+    fn override_with_instructions(&mut self, instructions: &[Instruction]) {
         let mut addr = ByteAddress::ZERO;
         for i in instructions {
             self.write_word(addr, i.encode());
@@ -451,56 +460,57 @@ impl Machine {
         &mut self,
         addr: ByteAddress,
         io: Box<dyn IoController>,
-    ) -> Option<ByteAddress> {
+    ) -> Result<ByteAddress, ControllerAttachError> {
         let (block_index, _) = addr.block_parts();
         if !matches!(self.mem.block(block_index), Block::Empty) {
-            return None;
+            return Err(ControllerAttachError::DesiredBlockOccupied {
+                addr: block_index.to_byte_addr(),
+            });
         }
 
         *self.mem.block_mut(block_index) = Block::with_io();
         self.ios.insert(block_index, io);
-        Some(block_index.to_byte_addr())
+        Ok(block_index.to_byte_addr())
     }
 
-    pub fn attach_io_controller(
+    fn attach_io_controller(
         &mut self,
         desired_address: Option<ByteAddress>,
+        recommended_address: ByteAddress,
         io: impl IoController + 'static,
-    ) -> Option<ByteAddress> {
+    ) -> Result<ByteAddress, ControllerAttachError> {
         let mut io = Some(Box::new(io) as Box<dyn IoController>);
 
         if let Some(addr) = desired_address {
             return self.attach_io_controller_at(addr, io.take().unwrap());
         }
 
-        let mut addr = ByteAddress(IO_BEGINNING);
+        let mut addr = recommended_address;
         loop {
             if matches!(self.mem.block_from_addr(addr).0, Block::Empty) {
                 return self.attach_io_controller_at(addr, io.take().unwrap());
             }
 
             // This breaks out when no next block exists.
-            addr = addr.next_block()?;
+            addr = addr
+                .next_block()
+                .ok_or(ControllerAttachError::NoEmptyIoBlock)?;
         }
     }
 
-    pub fn attach_system_call(
+    fn attach_system_call(
         &mut self,
         desired_call_number: u32,
         system_call: impl SystemCall + 'static,
-    ) -> Option<u32> {
+    ) -> Result<u32, SystemCallAttachError> {
         if self.sys.contains_key(&desired_call_number) {
-            return None;
+            return Err(SystemCallAttachError::DuplicateCallNumber {
+                call_number: desired_call_number,
+            });
         }
 
         self.sys.insert(desired_call_number, Box::new(system_call));
-        Some(desired_call_number)
-    }
-
-    pub fn detach_io_controller(&mut self, block_idx: BlockIndex) -> Option<()> {
-        self.ios.remove(&block_idx).map(|_| ())?;
-        *self.mem.block_mut(block_idx) = Block::Empty;
-        Some(())
+        Ok(desired_call_number)
     }
 
     pub fn read_register(&self, index: usize) -> u32 {

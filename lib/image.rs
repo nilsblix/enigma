@@ -1,8 +1,4 @@
-use std::{
-    error::Error,
-    fmt,
-    io::{self, Read, Write},
-};
+use std::io::{self, Read, Write};
 
 use super::{BLOCK_SIZE, Block, ByteAddress, Instruction, Machine, Memory};
 
@@ -17,12 +13,21 @@ impl Image {
         Image { mem: Memory::new() }
     }
 
-    pub fn from_chunk_bytes(bytes: &[u8]) -> io::Result<Image> {
+    pub(crate) fn from_memory(mem: Memory) -> Image {
+        Image { mem }
+    }
+
+    pub(crate) fn into_memory(self) -> Memory {
+        self.mem
+    }
+
+    pub(crate) fn clone_memory(&self) -> Memory {
+        self.mem.snapshot()
+    }
+
+    pub fn from_chunk_bytes(bytes: &[u8]) -> Result<Image, ImageError> {
         if bytes.len() < IMAGE_MAGIC.len() || bytes[..IMAGE_MAGIC.len()] != IMAGE_MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid EVM image header",
-            ));
+            return Err(ImageError::InvalidHeader);
         }
 
         let mut image = Image::new();
@@ -30,10 +35,7 @@ impl Image {
 
         while cursor < bytes.len() {
             if bytes.len() - cursor < 8 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "truncated EVM chunk header",
-                ));
+                return Err(ImageError::TruncatedChunkHeader);
             }
 
             let addr = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
@@ -43,10 +45,7 @@ impl Image {
 
             let len = len as usize;
             if bytes.len() - cursor < len {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "truncated EVM chunk payload",
-                ));
+                return Err(ImageError::TruncatedChunkPayload);
             }
 
             let chunk = &bytes[cursor..cursor + len];
@@ -57,7 +56,7 @@ impl Image {
         Ok(image)
     }
 
-    pub fn load_chunks(reader: &mut impl Read) -> io::Result<Image> {
+    pub fn load_chunks(reader: &mut impl Read) -> Result<Image, ImageError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
         Image::from_chunk_bytes(bytes.as_slice())
@@ -131,288 +130,47 @@ impl Image {
     }
 }
 
-/// A segment-oriented image builder.
-///
-/// Segments are compile-time layout ranges. They constrain where sequential
-/// writes may be placed, but they do not imply any runtime memory protection.
-pub struct ImageBuilder {
-    img: Image,
-    segments: Vec<Segment>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SegmentId(usize);
-
-struct Segment {
-    name: Option<String>,
-    start: ByteAddress,
-    end: ByteAddress,
-    head: ByteAddress,
-}
-
-#[derive(Debug)]
-pub enum BuilderError {
-    InvalidSegmentRange {
-        start: ByteAddress,
-        end: ByteAddress,
-    },
-    SegmentOverlap {
-        name: Option<String>,
-        start: ByteAddress,
-        end: ByteAddress,
-    },
-    UnknownSegment,
-    SegmentOverflow {
-        name: Option<String>,
-        head: ByteAddress,
-        len: u32,
-        end: ByteAddress,
-    },
-    AddressOverflow {
-        head: ByteAddress,
-        len: u32,
-    },
-    WriteTooLarge {
-        len: usize,
-    },
-}
-
-impl fmt::Display for BuilderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BuilderError::InvalidSegmentRange { start, end } => {
-                write!(
-                    f,
-                    "invalid segment range: {:#010x}..{:#010x}",
-                    start.0, end.0
-                )
-            }
-            BuilderError::SegmentOverlap { name, start, end } => {
-                write!(
-                    f,
-                    "segment{} overlaps existing segment: {:#010x}..{:#010x}",
-                    format_segment_name(name),
-                    start.0,
-                    end.0
-                )
-            }
-            BuilderError::UnknownSegment => write!(f, "unknown segment"),
-            BuilderError::SegmentOverflow {
-                name,
-                head,
-                len,
-                end,
-            } => {
-                write!(
-                    f,
-                    "segment{} overflow: write of {} bytes at {:#010x} exceeds {:#010x}",
-                    format_segment_name(name),
-                    len,
-                    head.0,
-                    end.0
-                )
-            }
-            BuilderError::AddressOverflow { head, len } => {
-                write!(
-                    f,
-                    "address overflow: advancing {:#010x} by {} bytes",
-                    head.0, len
-                )
-            }
-            BuilderError::WriteTooLarge { len } => {
-                write!(f, "write too large for image builder: {len} bytes")
-            }
-        }
-    }
-}
-
-impl Error for BuilderError {}
-
-impl ImageBuilder {
-    pub fn new() -> ImageBuilder {
-        ImageBuilder {
-            img: Image::new(),
-            segments: Vec::new(),
-        }
-    }
-
-    pub fn emit_image(self) -> Image {
-        self.img
-    }
-
-    pub fn define_segment(
-        &mut self,
-        name: Option<&str>,
-        start: ByteAddress,
-        end: ByteAddress,
-    ) -> Result<SegmentId, BuilderError> {
-        if start >= end {
-            return Err(BuilderError::InvalidSegmentRange { start, end });
-        }
-
-        for segment in &self.segments {
-            if start < segment.end && segment.start < end {
-                return Err(BuilderError::SegmentOverlap {
-                    name: name.map(str::to_owned),
-                    start,
-                    end,
-                });
-            }
-        }
-
-        let id = SegmentId(self.segments.len());
-        self.segments.push(Segment {
-            name: name.map(str::to_owned),
-            start,
-            end,
-            head: start,
-        });
-        Ok(id)
-    }
-
-    pub fn segment_head(&self, id: SegmentId) -> Result<ByteAddress, BuilderError> {
-        Ok(self.segment(id)?.head)
-    }
-
-    pub fn reserve_bytes(&mut self, id: SegmentId, len: u32) -> Result<ByteAddress, BuilderError> {
-        self.advance_segment(id, len)
-    }
-
-    pub fn write_word(&mut self, id: SegmentId, data: u32) -> Result<ByteAddress, BuilderError> {
-        let addr = self.advance_segment(id, 4)?;
-        self.img.write_word(addr, data);
-        Ok(addr)
-    }
-
-    pub fn write_half_word(
-        &mut self,
-        id: SegmentId,
-        data: u16,
-    ) -> Result<ByteAddress, BuilderError> {
-        let addr = self.advance_segment(id, 2)?;
-        self.img.write_half_word(addr, data);
-        Ok(addr)
-    }
-
-    pub fn write_byte(&mut self, id: SegmentId, data: u8) -> Result<ByteAddress, BuilderError> {
-        let addr = self.advance_segment(id, 1)?;
-        self.img.write_byte(addr, data);
-        Ok(addr)
-    }
-
-    pub fn write_bytes(
-        &mut self,
-        id: SegmentId,
-        bytes: &[u8],
-    ) -> Result<ByteAddress, BuilderError> {
-        let len = u32::try_from(bytes.len())
-            .map_err(|_| BuilderError::WriteTooLarge { len: bytes.len() })?;
-        let addr = self.advance_segment(id, len)?;
-        self.img.write_bytes(addr, bytes);
-        Ok(addr)
-    }
-
-    fn segment(&self, id: SegmentId) -> Result<&Segment, BuilderError> {
-        self.segments.get(id.0).ok_or(BuilderError::UnknownSegment)
-    }
-
-    fn advance_segment(&mut self, id: SegmentId, len: u32) -> Result<ByteAddress, BuilderError> {
-        let segment = self
-            .segments
-            .get_mut(id.0)
-            .ok_or(BuilderError::UnknownSegment)?;
-        let head = segment.head;
-        let Some(next) = head.0.checked_add(len) else {
-            return Err(BuilderError::AddressOverflow { head, len });
-        };
-        if next > segment.end.0 {
-            return Err(BuilderError::SegmentOverflow {
-                name: segment.name.clone(),
-                head,
-                len,
-                end: segment.end,
-            });
-        }
-        segment.head = ByteAddress(next);
-        Ok(head)
-    }
-}
-
-fn format_segment_name(name: &Option<String>) -> String {
-    match name {
-        Some(name) => format!(" `{name}`"),
-        None => String::new(),
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum ImageError {
+    #[error("invalid EVM image header")]
+    InvalidHeader,
+    #[error("truncated EVM chunk header")]
+    TruncatedChunkHeader,
+    #[error("truncated EVM chunk payload")]
+    TruncatedChunkPayload,
+    #[error("could not read EVM image chunks: {0}")]
+    Read(#[from] io::Error),
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Image, ImageBuilder};
-    use crate::ByteAddress;
+    use super::{Image, ImageError};
 
     #[test]
-    fn builder_segments_have_independent_heads() {
-        let mut builder = ImageBuilder::new();
-        let text = builder
-            .define_segment(Some("text"), ByteAddress(0), ByteAddress(0x100))
-            .unwrap();
-        let data = builder
-            .define_segment(Some("data"), ByteAddress(0x1000), ByteAddress(0x1100))
-            .unwrap();
-
-        assert_eq!(
-            builder.write_word(text, 0x1122_3344).unwrap(),
-            ByteAddress(0)
-        );
-        assert_eq!(
-            builder.write_bytes(data, b"abc").unwrap(),
-            ByteAddress(0x1000)
-        );
-        assert_eq!(builder.segment_head(text).unwrap(), ByteAddress(4));
-        assert_eq!(builder.segment_head(data).unwrap(), ByteAddress(0x1003));
+    fn image_rejects_invalid_header() {
+        let err = match Image::from_chunk_bytes(b"nope") {
+            Ok(_) => panic!("image decode should fail"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, ImageError::InvalidHeader));
     }
 
     #[test]
-    fn builder_rejects_segment_overflow() {
-        let mut builder = ImageBuilder::new();
-        let text = builder
-            .define_segment(Some("text"), ByteAddress(0), ByteAddress(4))
-            .unwrap();
-
-        builder.write_word(text, 0).unwrap();
-        let err = builder.write_byte(text, 1).unwrap_err().to_string();
-        assert!(err.contains("segment `text` overflow"));
+    fn image_rejects_truncated_chunk_header() {
+        let err = match Image::from_chunk_bytes(b"EVM1\0") {
+            Ok(_) => panic!("image decode should fail"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, ImageError::TruncatedChunkHeader));
     }
 
     #[test]
-    fn builder_rejects_overlapping_segments() {
-        let mut builder = ImageBuilder::new();
-        builder
-            .define_segment(Some("a"), ByteAddress(0), ByteAddress(0x100))
-            .unwrap();
-        let err = builder
-            .define_segment(Some("b"), ByteAddress(0x80), ByteAddress(0x180))
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("segment `b` overlaps existing segment"));
-    }
-
-    #[test]
-    fn builder_reserve_advances_without_emitting_bytes() {
-        let mut builder = ImageBuilder::new();
-        let heap = builder
-            .define_segment(Some("heap"), ByteAddress(0x2000), ByteAddress(0x3000))
-            .unwrap();
-
-        assert_eq!(
-            builder.reserve_bytes(heap, 0x20).unwrap(),
-            ByteAddress(0x2000)
-        );
-        assert_eq!(builder.segment_head(heap).unwrap(), ByteAddress(0x2020));
-
-        let image: Image = builder.emit_image();
-        let mut machine = image.consume_to_machine();
-        assert_eq!(machine.read_byte(ByteAddress(0x2000)), 0);
+    fn image_rejects_truncated_chunk_payload() {
+        let bytes = [b'E', b'V', b'M', b'1', 0, 0, 0, 0, 0, 0, 0, 4, 0xaa, 0xbb];
+        let err = match Image::from_chunk_bytes(&bytes) {
+            Ok(_) => panic!("image decode should fail"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, ImageError::TruncatedChunkPayload));
     }
 }

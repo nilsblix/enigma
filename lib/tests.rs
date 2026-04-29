@@ -406,43 +406,64 @@ fn new_test_system_call() -> (TestSystemCall, Rc<TestSystemCallState>) {
 #[test]
 fn with_controller_skips_non_empty_io_window_blocks() {
     let (controller, _) = new_test_controller();
-    let mut m = Machine::new();
-    m.write_byte(ByteAddress(IO_BEGINNING), 0xAA);
+    let mut image = image::Image::new();
+    let io_addr = builders::recommended_io_address();
+    image.write_byte(io_addr, 0xAA);
+    let mut builder = builders::MachineBuilder::new().with_image(image);
 
-    let addr = m.attach_io_controller(None, controller).unwrap();
+    let addr = builder.attach_io_controller(None, controller).unwrap();
+    let mut m = builder.build();
 
-    assert!(!matches!(
-        m.mem.block_from_addr(ByteAddress(IO_BEGINNING)).0,
-        Block::Io
-    ));
-    assert_eq!(m.read_byte(ByteAddress(IO_BEGINNING)), 0xAA);
+    assert!(!matches!(m.mem.block_from_addr(io_addr).0, Block::Io));
+    assert_eq!(m.read_byte(io_addr), 0xAA);
     assert!(matches!(m.mem.block_from_addr(addr).0, Block::Io));
 }
 
 #[test]
 fn with_controller_returns_error_when_no_io_slots_remain() {
     let mut m = Machine::new();
-    let (start_block, _) = ByteAddress(IO_BEGINNING).block_parts();
+    let (start_block, _) = builders::recommended_io_address().block_parts();
     for index in usize::from(start_block)..BLOCK_COUNT {
         m.mem.blocks[index] = Block::with_io();
     }
 
     let (controller, _) = new_test_controller();
-    match m.attach_io_controller(None, controller) {
-        Some(_) => panic!("expected controller attachment to fail"),
-        None => {}
+    let mut builder = builders::MachineBuilder::from_machine(m);
+    match builder.attach_io_controller(None, controller) {
+        Ok(_) => panic!("expected controller attachment to fail"),
+        Err(err) => assert_eq!(err, ControllerAttachError::NoEmptyIoBlock),
+    }
+}
+
+#[test]
+fn with_controller_rejects_occupied_desired_address() {
+    let (controller, _) = new_test_controller();
+    let desired_addr = builders::recommended_io_address();
+    let mut image = image::Image::new();
+    image.write_byte(desired_addr, 0xAA);
+    let mut builder = builders::MachineBuilder::new().with_image(image);
+
+    match builder.attach_io_controller(Some(desired_addr), controller) {
+        Ok(_) => panic!("expected controller attachment to fail"),
+        Err(err) => assert_eq!(
+            err,
+            ControllerAttachError::DesiredBlockOccupied { addr: desired_addr }
+        ),
     }
 }
 
 #[test]
 fn with_controller_uses_desired_address() {
     let (controller, _) = new_test_controller();
-    let mut m = Machine::new();
-    let desired_addr = ByteAddress(IO_BEGINNING + 2 * BLOCK_SIZE as u32);
+    let mut builder = builders::MachineBuilder::new();
+    let desired_addr = builders::recommended_io_address()
+        .overflowing_add_bytes(ByteOffset(2 * BLOCK_SIZE as i32))
+        .0;
 
-    let addr = m
+    let addr = builder
         .attach_io_controller(Some(desired_addr), controller)
         .unwrap();
+    let m = builder.build();
 
     assert_eq!(addr, desired_addr);
     assert!(matches!(m.mem.block_from_addr(desired_addr).0, Block::Io));
@@ -452,19 +473,23 @@ fn with_controller_uses_desired_address() {
 fn attach_system_call_rejects_duplicate_number() {
     let (system_call_a, _) = new_test_system_call();
     let (system_call_b, _) = new_test_system_call();
-    let mut m = Machine::new();
+    let mut builder = builders::MachineBuilder::new();
 
-    assert_eq!(m.attach_system_call(7, system_call_a), Some(7));
-    assert_eq!(m.attach_system_call(7, system_call_b), None);
+    assert_eq!(builder.attach_system_call(7, system_call_a), Ok(7));
+    assert_eq!(
+        builder.attach_system_call(7, system_call_b),
+        Err(SystemCallAttachError::DuplicateCallNumber { call_number: 7 })
+    );
 }
 
 #[test]
 fn system_call_dispatches_and_preserves_r0() {
     let instructions = [is::sys(), Instruction::HALT];
     let (system_call, state) = new_test_system_call();
-    let mut m = Machine::from_instructions(instructions.as_slice());
+    let mut builder = builders::MachineBuilder::new().with_instructions(instructions.as_slice());
 
-    assert_eq!(m.attach_system_call(7, system_call), Some(7));
+    assert_eq!(builder.attach_system_call(7, system_call), Ok(7));
+    let mut m = builder.build();
     m.write_word(ByteAddress(0x2_0000), 0x1234_5678);
     m.write_register(1, 7);
     m.write_register(2, 0x2_0000);
@@ -498,8 +523,9 @@ fn word_load_spanning_ram_and_io_panics() {
     state.bytes.borrow_mut()[1] = 0xCC;
     state.bytes.borrow_mut()[2] = 0xDD;
 
-    let mut m = Machine::from_instructions(instructions.as_slice());
-    let addr = m.attach_io_controller(None, controller).unwrap();
+    let mut builder = builders::MachineBuilder::new().with_instructions(instructions.as_slice());
+    let addr = builder.attach_io_controller(None, controller).unwrap();
+    let mut m = builder.build();
 
     let addr_minus_1 = addr.overflowing_add_bytes(ByteOffset(-1)).0;
     m.write_byte(addr_minus_1, 0xAA);
@@ -520,9 +546,10 @@ fn word_load_spanning_two_io_blocks_panics() {
     state_b.bytes.borrow_mut()[1] = 0x33;
     state_b.bytes.borrow_mut()[2] = 0x44;
 
-    let mut m = Machine::from_instructions(instructions.as_slice());
-    let addr_a = m.attach_io_controller(None, controller_a).unwrap();
-    let addr_b = m.attach_io_controller(None, controller_b).unwrap();
+    let mut builder = builders::MachineBuilder::new().with_instructions(instructions.as_slice());
+    let addr_a = builder.attach_io_controller(None, controller_a).unwrap();
+    let addr_b = builder.attach_io_controller(None, controller_b).unwrap();
+    let mut m = builder.build();
     m.write_register(2, addr_a.0 + BLOCK_SIZE as u32 - 1);
 
     m.exec_while_not_halt().unwrap();
@@ -538,8 +565,9 @@ fn word_load_within_single_io_block_uses_single_read() {
     state.bytes.borrow_mut()[2] = 0x33;
     state.bytes.borrow_mut()[3] = 0x44;
 
-    let mut m = Machine::from_instructions(instructions.as_slice());
-    let addr = m.attach_io_controller(None, controller).unwrap();
+    let mut builder = builders::MachineBuilder::new().with_instructions(instructions.as_slice());
+    let addr = builder.attach_io_controller(None, controller).unwrap();
+    let mut m = builder.build();
     m.write_register(2, addr.0);
 
     m.exec_while_not_halt().unwrap();
